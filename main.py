@@ -30,7 +30,7 @@ WELCOME_MESSAGES = [
         "• **매일 루틴 수정:** `/edit [기존루틴] -> [새루틴]` ➔ 루틴 이름 변경\n"
         "• **비공개 질문:** `질문: [내용]` ➔ 관리자 1:1 전달\n"
         "• **공개 질문:** `전체질문: [내용]` ➔ 토픽방 공유\n"
-        "• `/list` : 오늘의 남은 공부 목록 확인\n"
+        "• `/list` : 오늘의 공부 목록 확인\n"
         "• `/weekly` : 이번 주 주간 정산 및 미완료 체크박스 리포트\n"
         "• `/reset` : 할 일 / 루틴 선택 초기화\n\n"
         "✨ 지금 바로 오늘 달성할 계획을 입력해 보세요!"
@@ -115,22 +115,22 @@ def build_plan_view(key, show_all_buttons=False, target_indices=None):
             None,
         )
 
-    normal_plans = [p for p in plans if p.get("category") != "[매일]"]
-    routine_plans = [p for p in plans if p.get("category") == "[매일]"]
+    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+    routine_plans = [p for p in plans if "[매일]" in p.get("category", "")]
 
     stat_lines = []
 
     if normal_plans:
         n_completed = sum(1 for p in normal_plans if p["done"])
         n_total = len(normal_plans)
-        n_rate = (n_completed / n_total) * 100
+        n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0
         stat_lines.append(f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)")
 
     if routine_plans:
         r_completed = sum(1 for p in routine_plans if p["done"])
         r_total = len(routine_plans)
         if r_completed == r_total and r_total > 0:
-            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total} - (달성!)`")
+            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total} - (달성!)` 🥳")
         else:
             stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total}`")
 
@@ -145,13 +145,12 @@ def build_plan_view(key, show_all_buttons=False, target_indices=None):
             f"📊 **오늘의 달성 현황:**\n{stat_str}\n\n"
             f"오늘의 모든 계획을 완수하셨습니다! 수고하셨어요! ✨"
         )
-        return text, None
-
-    text = (
-        f"📝 **오늘의 공부 점검**\n\n"
-        f"📊 **달성 현황:**\n{stat_str}\n\n"
-        f"버튼을 누르면 완료(🐦‍⬛️) 상태로 전환됩니다.\n"
-    )
+    else:
+        text = (
+            f"📝 **오늘의 공부 점검**\n\n"
+            f"📊 **달성 현황:**\n{stat_str}\n\n"
+            f"버튼을 누르면 완료(🐦‍⬛️) 상태로 전환됩니다.\n"
+        )
 
     if target_indices is not None:
         indices_to_show = set(target_indices)
@@ -196,8 +195,8 @@ def build_weekly_view(key):
     week_range_str = get_korean_week_range_str()
     msg = f"📅 **[이번 주 공부 종합 점검] ({week_range_str})**\n\n"
 
-    normal_plans = [p for p in plans if p.get("category") != "[매일]"]
-    routine_plans = [p for p in plans if p.get("category") == "[매일]"]
+    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+    routine_plans = [p for p in plans if "[매일]" in p.get("category", "")]
 
     if normal_plans:
         n_completed = sum(1 for p in normal_plans if p["done"])
@@ -207,17 +206,17 @@ def build_weekly_view(key):
 
     if routine_plans:
         msg += "🔄 **[매일 루틴 항목별 달성 현황]**\n"
-        routine_counts = {}
-        for p in routine_plans:
-            task_name = p["task"]
-            if task_name not in routine_counts:
-                routine_counts[task_name] = sum(1 for r in routine_plans if r["task"] == task_name and r["done"])
+        routine_names = list(dict.fromkeys([p["task"] for p in routine_plans]))
         
-        for task_name, count in routine_counts.items():
-            if count >= 7:
-                msg += f"• **{task_name}:** `7/7 - 달성(!)`\n"
+        for task_name in routine_names:
+            completed_count = sum(
+                1 for p in routine_plans if p["task"] == task_name and p["done"]
+            )
+            
+            if completed_count >= 7:
+                msg += f"• **{task_name}:** `{completed_count}/7 - (달성!)` 🥳\n"
             else:
-                msg += f"• **{task_name}:** `{count}/7`\n"
+                msg += f"• **{task_name}:** `{completed_count}/7` 완료\n"
         msg += "\n"
 
     keyboard = []
@@ -452,7 +451,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     modified_count = 0
     for p in plans:
-        if p.get("category") == "[매일]" and p["task"] == old_name:
+        if "[매일]" in p.get("category", "") and p["task"] == old_name:
             p["task"] = new_name
             modified_count += 1
 
@@ -474,10 +473,10 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# 5. /list 명령어
+# 5. /list 명령어 (show_all_buttons=True 적용)
 async def list_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
-    text, reply_markup = build_plan_view(key, show_all_buttons=False)
+    text, reply_markup = build_plan_view(key, show_all_buttons=True)
     await update.message.reply_text(
         text, reply_markup=reply_markup, parse_mode="Markdown"
     )
@@ -510,12 +509,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if data == "reset_tasks":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
-                topic_plans[key]["plans"] = [p for p in plans if p.get("category") == "[매일]"]
+                topic_plans[key]["plans"] = [p for p in plans if "[매일]" in p.get("category", "")]
             await query.edit_message_text("🧹 **일반 할 일만 초기화되었습니다.** (`[매일]` 루틴 유지)", parse_mode="Markdown")
         elif data == "reset_routines":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
-                topic_plans[key]["plans"] = [p for p in plans if p.get("category") != "[매일]"]
+                topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
             await query.edit_message_text("🧹 **`[매일]` 루틴만 초기화되었습니다.** (일반 할 일 유지)", parse_mode="Markdown")
         elif data == "reset_all":
             if key in topic_plans:
@@ -555,7 +554,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not target_indices:
                     target_indices = None
 
-                text, reply_markup = build_plan_view(key, target_indices=target_indices)
+                text, reply_markup = build_plan_view(key, show_all_buttons=True, target_indices=target_indices)
 
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -613,8 +612,8 @@ def generate_summary_text():
         user_name = data.get("user_name", "사용자")
         chat_id, thread_id = key
 
-        normal_plans = [p for p in plans if p.get("category") != "[매일]"]
-        routine_plans = [p for p in plans if p.get("category") == "[매일]"]
+        normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+        routine_plans = [p for p in plans if "[매일]" in p.get("category", "")]
 
         location_label = f"토픽 #{thread_id}" if thread_id != 0 else "개인방"
         summary_text += f"**{idx}. [{user_name}] ({location_label})**\n"
@@ -670,7 +669,7 @@ async def morning_plan_reminder(context: ContextTypes.DEFAULT_TYPE):
         chat_id, thread_id = key
         random_greeting = random.choice(WELCOME_MESSAGES)
         
-        text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        text, reply_markup = build_plan_view(key, show_all_buttons=True)
         
         msg = (
             f"🌅 **[{date_str} 아침 알림]**\n"
@@ -693,7 +692,7 @@ async def daily_check_reminder(context: ContextTypes.DEFAULT_TYPE):
     date_str = get_korean_date_str()
     for key, data in topic_plans.items():
         chat_id, thread_id = key
-        text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        text, reply_markup = build_plan_view(key, show_all_buttons=True)
         msg = f"⏰ **[{date_str} 밤 22시 공부 점검 알림]**\n\n" + text
         await context.bot.send_message(
             chat_id=chat_id,
@@ -739,7 +738,7 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
         plans = data.get("plans", [])
         
-        routine_tasks = list(dict.fromkeys([p["task"] for p in plans if p.get("category") == "[매일]"]))
+        routine_tasks = list(dict.fromkeys([p["task"] for p in plans if "[매일]" in p.get("category", "")]))
         
         for task_name in routine_tasks:
             plans.append({
@@ -782,7 +781,7 @@ async def post_init(application):
         BotCommand("start", "봇 시작 및 사용법 보기"),
         BotCommand("routine", "매일 반복할 루틴 등록 ([매일] 카테고리)"),
         BotCommand("edit", "등록된 매일 루틴 수정 (/edit 기존 -> 새이름)"),
-        BotCommand("list", "오늘의 남은 공부 체크박스 목록 확인"),
+        BotCommand("list", "오늘의 공부 체크박스 목록 확인"),
         BotCommand("weekly", "주간 종합 점검 및 미완료 목록"),
         BotCommand("reset", "할 일 / 루틴 선택 초기화"),
     ]
