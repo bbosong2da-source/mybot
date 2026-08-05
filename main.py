@@ -3,6 +3,8 @@ import datetime
 import random
 import re
 import pytz
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -787,7 +789,23 @@ async def post_init(application):
     await application.bot.set_my_commands(commands)
 
 
+# 🌐 Render Web Service 포트 응답용 가짜 헬스체크 서버
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def run_health_check_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+
 if __name__ == "__main__":
+    # Render 포트 통과용 웹서버를 백그라운드 쓰레드로 시작
+    threading.Thread(target=run_health_check_server, daemon=True).start()
+
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
