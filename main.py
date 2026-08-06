@@ -90,7 +90,6 @@ def generate_bible_status_text(current_ch_idx):
             msg += "\n"
     return msg
 
-# 💡 일반 사용자용 안내 문구 (관리자 명령어는 노출되지 않습니다)
 WELCOME_MESSAGES = [
     "👋 **반갑습니다! 공부 및 성경 읽기 계획 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
@@ -182,14 +181,24 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 관리자만 사용할 수 있는 명령어입니다.")
         return
 
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/broadcast\s*", "", text_content).strip()
 
     if not raw_input:
         await update.message.reply_text(
-            "📢 **[독립 공지 과제 발송 안내]**\n\n"
-            "**/broadcast [제목]** 형식으로 작성해 주세요.\n\n"
-            "💡 **특정 방 제외 규칙:** 방 이름이나 사용자 정보에 `자료`라는 단어가 들어간 곳은 자동으로 발송에서 제외됩니다.",
+            "📢 **[독립 공지 과제 발송 방법]**\n\n"
+            "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n\n"
+            "**작성 예시:**\n"
+            "```\n"
+            "/broadcast [전체 필수 공지 과제]\n"
+            "주간 질문 작성하기\n"
+            "공지사항 숙지 및 체크하기\n"
+            "```",
             parse_mode="Markdown"
         )
         return
@@ -230,20 +239,18 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     skipped_count = 0
     msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
-    # 🚫 공지를 안 보낼 특정 키워드 설정 (예: '자료', '자료공유')
     EXCLUDE_KEYWORDS = ["자료", "자료공유", "자료방"]
 
-    for key in list(topic_plans.keys()):
-        chat_id, thread_id = key
-        user_info = topic_plans.get(key, {})
-        user_name = user_info.get("user_name", "")
+    for t_key in list(topic_plans.keys()):
+        chat_id, thread_id = t_key
+        user_info = topic_plans.get(t_key, {})
+        u_name = user_info.get("user_name", "")
 
-        # 제외 키워드가 포함된 토픽/채팅방은 건너뜀
-        if any(keyword in user_name for keyword in EXCLUDE_KEYWORDS):
+        if any(keyword in u_name for keyword in EXCLUDE_KEYWORDS):
             skipped_count += 1
             continue
 
-        broadcast_data[bc_id]["records"][key] = {i: False for i in range(len(tasks))}
+        broadcast_data[bc_id]["records"][t_key] = {i: False for i in range(len(tasks))}
 
         try:
             await context.bot.send_message(
@@ -255,10 +262,10 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             success_count += 1
         except Exception as e:
-            print(f"독립 공지 발송 실패 ({key}): {e}")
+            print(f"독립 공지 발송 실패 ({t_key}): {e}")
 
     await update.message.reply_text(
-        f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
+        f"✅ 총 **{success_count}개**의 채팅방/토픽에 공지를 발송했습니다!\n"
         f"🚫 제외된 채팅방(자료방 등): **{skipped_count}개**\n"
         f"📊 리포트 확인: `/broadcast_report`"
     )
@@ -1106,7 +1113,7 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
 
 
-# 🔒 자동완성 버튼 목록 설정 (관리자 전용 명령어인 broadcast 및 broadcast_report는 완벽 미노출)
+# 🔒 자동완성 메뉴 목록 (관리자 전용 명령어인 broadcast 및 broadcast_report는 미노출)
 async def post_init(application):
     commands = [
         BotCommand("start", "봇 시작 및 사용법 보기"),
