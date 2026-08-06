@@ -243,4 +243,741 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tasks = [t.strip() for t in tasks_part.split(",") if t.strip()]
 
         for d in valid_days:
-            if d not in
+            if d not in topic_plans[key]["weekly_tasks"]:
+                topic_plans[key]["weekly_tasks"][d] = []
+            topic_plans[key]["weekly_tasks"][d].extend(tasks)
+            topic_plans[key]["weekly_tasks"][d] = list(dict.fromkeys(topic_plans[key]["weekly_tasks"][d]))
+            added_summary.append(f"• **{d}요일:** {', '.join(tasks)}")
+
+    if added_summary:
+        await update.message.reply_text(
+            "📅 **주간 반복 과제가 새롭게 세팅되었습니다!**\n"
+            "해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n\n" + "\n".join(added_summary),
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("❌ 요일과 할 일 형식을 맞춰서 입력해 주세요. (예: `월: 과제 제출`)")
+
+
+async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    raw_args = " ".join(context.args).strip() if context.args else ""
+
+    if not raw_args.isdigit() or int(raw_args) <= 0:
+        await update.message.reply_text("💡 **하루에 읽을 장수(숫자)를 입력해 주세요.** (예: `/bible_pages 5`)", parse_mode="Markdown")
+        return
+
+    chunk_size = int(raw_args)
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": chunk_size, "weekly_tasks": {}, "notify_time": None}
+    else:
+        topic_plans[key]["bible_chunk"] = chunk_size
+
+    await update.message.reply_text(f"⚙️ **성경 읽기 분량이 하루 `{chunk_size}장`으로 설정되었습니다!**", parse_mode="Markdown")
+
+
+async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    raw_args = " ".join(context.args).strip() if context.args else ""
+
+    if not raw_args:
+        await update.message.reply_text("💡 예시: `/bible_start 창 1장` 또는 `/bible_start 마태복음 7장`", parse_mode="Markdown")
+        return
+
+    matched_ch_idx = -1
+    clean_keyword = re.sub(r"\s+", "", raw_args).lower()
+
+    for idx, (b_short, b_ch) in enumerate(ALL_BIBLE_CHAPTERS):
+        full_book_name = next((f for s, f, _ in BIBLE_STRUCTURE if s == b_short), "")
+        target_str1 = re.sub(r"\s+", "", f"{b_short}{b_ch}장").lower()
+        target_str2 = re.sub(r"\s+", "", f"{full_book_name}{b_ch}장").lower()
+        
+        if clean_keyword in target_str1 or clean_keyword in target_str2 or clean_keyword == f"{b_short}{b_ch}".lower():
+            matched_ch_idx = idx
+            break
+
+    if matched_ch_idx == -1:
+        await update.message.reply_text(f"❌ 입력하신 `{raw_args}` 위치를 성경 데이터에서 찾을 수 없습니다.", parse_mode="Markdown")
+        return
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": matched_ch_idx, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+    else:
+        topic_plans[key]["bible_ch_idx"] = matched_ch_idx
+
+    chunk_size = topic_plans[key].get("bible_chunk", 4)
+    target_label = get_bible_label(matched_ch_idx, chunk_size)
+    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+
+    plans = topic_plans[key].get("plans", [])
+    topic_plans[key]["plans"] = [p for p in plans if p.get("is_bible") != True]
+    
+    topic_plans[key]["plans"].append({
+        "task": f"성경 묵상: {target_label}",
+        "category": "[매일]",
+        "done": False,
+        "date": today_str,
+        "is_bible": True,
+        "bible_ch_idx": matched_ch_idx
+    })
+
+    plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
+    await update.message.reply_text(
+        f"🔥 **성경 묵상 시작 지점이 설정되었습니다!**\n"
+        f"• 하루 설정 분량: **{chunk_size}장씩**\n"
+        f"• 시작 분량: **{target_label}**\n\n"
+        f"-------------------------\n"
+        f"{plan_text}",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+
+async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    data = topic_plans.get(key, {})
+    current_ch_idx = data.get("bible_ch_idx", 0)
+
+    msg = generate_bible_status_text(current_ch_idx)
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+def build_plan_view(key, show_all_buttons=False, target_indices=None):
+    data = topic_plans.get(key, {})
+    plans = data.get("plans", [])
+
+    if not plans:
+        return (
+            "📋 등록된 할 일이 없습니다.\n채팅창에 오늘 할 일이나 `/routine`, `/bible_start`를 입력해 보세요!",
+            None,
+        )
+
+    plans_with_index = list(enumerate(plans))
+    plans_with_index.sort(key=lambda x: (x[1].get("category", ""), x[1].get("is_bible", False)))
+
+    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+    routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and p.get("is_bible") != True]
+    bible_plans = [p for p in plans if p.get("is_bible") == True]
+
+    stat_lines = []
+
+    if normal_plans:
+        n_completed = sum(1 for p in normal_plans if p["done"])
+        n_total = len(normal_plans)
+        n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0
+        stat_lines.append(f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)")
+
+    if routine_plans:
+        r_completed = sum(1 for p in routine_plans if p["done"])
+        r_total = len(routine_plans)
+        if r_completed == r_total and r_total > 0:
+            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total} - (달성!)` 🥳")
+        else:
+            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total}`")
+
+    if bible_plans:
+        b_completed = sum(1 for p in bible_plans if p["done"])
+        b_total = len(bible_plans)
+        status_str = "완료 📖" if b_completed == b_total else "진행 중 🔥"
+        stat_lines.append(f"• **오늘의 성경 묵상:** {bible_plans[0]['task'].replace('성경 묵상: ', '')} (`{status_str}`)")
+
+    stat_str = "\n".join(stat_lines)
+
+    completed_count = sum(1 for p in plans if p["done"])
+    total_count = len(plans)
+
+    if completed_count == total_count and total_count > 0:
+        text = (
+            f"🥳 **ALL CLEAR!** 🎉\n\n"
+            f"📊 **오늘의 달성 현황:**\n{stat_str}\n\n"
+            f"오늘의 모든 계획을 완수하셨습니다! 수고하셨어요! ✨"
+        )
+    else:
+        text = (
+            f"📝 **오늘의 공부 점검**\n\n"
+            f"📊 **달성 현황:**\n{stat_str}\n\n"
+            f"버튼을 누르면 완료 상태로 전환됩니다.\n"
+        )
+
+    if target_indices is not None:
+        indices_to_show = set(target_indices)
+    elif show_all_buttons:
+        indices_to_show = set(range(len(plans)))
+    else:
+        indices_to_show = {i for i, p in enumerate(plans) if not p["done"]}
+
+    keyboard = []
+    last_category = None
+
+    for real_idx, item in plans_with_index:
+        if real_idx in indices_to_show:
+            category = item.get("category", "")
+
+            if category and category != last_category:
+                keyboard.append(
+                    [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
+                )
+                last_category = category
+
+            if item.get("is_bible"):
+                status_icon = "📖" if item["done"] else "🔥"
+            else:
+                status_icon = "🐦‍⬛️" if item["done"] else "🥚"
+
+            btn_text = f"{status_icon} {item['task']}"
+            keyboard.append(
+                [InlineKeyboardButton(btn_text, callback_data=f"toggle_{real_idx}")]
+            )
+
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+    return text, reply_markup
+
+
+def build_weekly_view(key):
+    data = topic_plans.get(key, {})
+    plans = data.get("plans", [])
+
+    if not plans and "bible_ch_idx" not in data:
+        return "📅 이번 주에 등록된 공부/성경 읽기 계획이 없습니다.", None
+
+    uncompleted = [p for p in plans if not p["done"]]
+
+    week_range_str = get_korean_week_range_str()
+    msg = f"📅 **[이번 주 공부 & 성경 정산 리포트] ({week_range_str})**\n\n"
+
+    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+    routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and p.get("is_bible") != True]
+    bible_plans = [p for p in plans if p.get("is_bible") == True]
+
+    if normal_plans:
+        n_completed = sum(1 for p in normal_plans if p["done"])
+        n_total = len(normal_plans)
+        n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0
+        msg += f"📊 **주간 일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n\n"
+
+    if routine_plans:
+        msg += "🔄 **[매일 루틴 항목별 달성 현황]**\n"
+        routine_names = list(dict.fromkeys([p["task"] for p in routine_plans]))
+        
+        for task_name in routine_names:
+            completed_count = sum(
+                1 for p in routine_plans if p["task"] == task_name and p["done"]
+            )
+            if completed_count >= 7:
+                msg += f"• **{task_name}:** `{completed_count}/7 - (달성!)` 🥳\n"
+            else:
+                msg += f"• **{task_name}:** `{completed_count}/7` 완료\n"
+        msg += "\n"
+
+    msg += "📖 **[성경 묵상 주간 & 전체 누적 통계]**\n"
+    bible_weekly_completed = sum(1 for p in bible_plans if p["done"])
+    bible_weekly_rate = (bible_weekly_completed / 7.0) * 100 if bible_weekly_completed <= 7 else 100.0
+    msg += f"• **이번 주 성경 묵상 달성률:** `{bible_weekly_rate:.1f}%` ({bible_weekly_completed}/7일 완수)\n"
+
+    current_ch_idx = data.get("bible_ch_idx", 0)
+    chunk_size = data.get("bible_chunk", 4)
+    total_chapters = len(ALL_BIBLE_CHAPTERS)
+    overall_rate = (current_ch_idx / total_chapters) * 100
+    current_label = get_bible_label(current_ch_idx, chunk_size) if current_ch_idx < total_chapters else "완독 완료!"
+    
+    msg += f"• **성경 전체 통산 달성률 (창세기 1장 기준):** `{overall_rate:.2f}%` ({current_ch_idx}/{total_chapters} 장)\n"
+    msg += f"• **현재 진행 위치 및 설정:** `{current_label}` (하루 {chunk_size}장씩)\n\n"
+
+    keyboard = []
+
+    if uncompleted:
+        msg += f"⚠️ **[미완료된 항목 - 추가 점검 필요]** ({len(uncompleted)}개)\n"
+        current_cat = None
+
+        for p in uncompleted:
+            cat = p.get("category", "")
+            if cat and cat != current_cat:
+                msg += f"\n📂 **{cat}**\n"
+                keyboard.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                current_cat = cat
+
+            date_str = f" ({p['date']})" if "date" in p else ""
+
+            icon = "🔥" if p.get("is_bible") else "🥚"
+            msg += f"  {icon} {p['task']}{date_str}\n"
+            btn_label = f"{icon} {p['task']}{date_str}"
+
+            real_idx = plans.index(p)
+            keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"toggle_{real_idx}")])
+    else:
+        msg += "🎉 이번 주 등록된 모든 공부 및 성경 묵상을 완수하셨습니다!\n"
+
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+    return msg, reply_markup
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    chat_id, thread_id = key
+    text = update.message.text.strip()
+    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+
+    if text.startswith("전체질문:") or text.startswith("공개질문:"):
+        question_text = re.sub(r"^(전체질문|공개질문)[:\s]*", "", text).strip()
+        if not question_text:
+            await update.message.reply_text("💡 질문 내용을 작성해 주세요!", parse_mode="Markdown")
+            return
+
+        location_label = f"토픽 #{thread_id}" if thread_id != 0 else "개인방"
+        admin_msg = f"📢 **[공개 질문]** {user_name} ({location_label}): {question_text}"
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
+        except Exception as e:
+            print(f"관리자 알림 실패: {e}")
+
+        await update.message.reply_text(f"📢 **[전체 질문 게시]**\n👤 {user_name}: {question_text}", parse_mode="Markdown")
+        return
+
+    elif text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
+        question_text = re.sub(r"^(비공개질문|질문)[:\s]*", "", text).strip()
+        if not question_text:
+            await update.message.reply_text("💡 질문 내용을 작성해 주세요!", parse_mode="Markdown")
+            return
+
+        location_label = f"토픽 #{thread_id}" if thread_id != 0 else "개인방"
+        admin_msg = f"🔒 **[비공개 질문]** {user_name} ({location_label}): {question_text}"
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
+            await update.message.reply_text("🔒 질문이 관리자에게 비공개로 전달되었습니다.")
+        except Exception as e:
+            print(f"질문 전달 실패: {e}")
+        return
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+    else:
+        topic_plans[key]["user_name"] = user_name
+
+    lines = text.split("\n")
+    added_count = 0
+    current_category = None
+
+    for line in lines:
+        raw_line = line.strip()
+        if not raw_line:
+            continue
+
+        cat_match = re.search(r"^\[\s*(.*?)\s*\]$", raw_line)
+        if cat_match:
+            cat_name = cat_match.group(1).strip()
+            if cat_name:
+                current_category = f"[{cat_name}]"
+                continue
+
+        cleaned = raw_line
+        if cleaned:
+            assigned_cat = current_category if current_category else "[일반]"
+            topic_plans[key]["plans"].append({
+                "task": cleaned,
+                "category": assigned_cat,
+                "done": False,
+                "date": today_str,
+            })
+            added_count += 1
+
+    if added_count > 0:
+        cheer = random.choice(CHEERING_MESSAGES)
+        plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
+
+        response_msg = (
+            f"✅ **{added_count}개의 계획이 추가되었습니다!**\n"
+            f"{cheer}\n\n"
+            f"-------------------------\n"
+            f"{plan_text}"
+        )
+        await update.message.reply_text(response_msg, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+
+    if update.message.text:
+        lines = update.message.text.split("\n")
+        first_line_clean = re.sub(r"^/routine\s*", "", lines[0]).strip()
+        routine_lines = [first_line_clean] + lines[1:] if len(lines) > 1 else [first_line_clean]
+    else:
+        raw_args = " ".join(context.args).strip() if context.args else ""
+        routine_lines = [raw_args]
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+
+    added_count = 0
+    for line in routine_lines:
+        cleaned = line.strip()
+        if cleaned:
+            topic_plans[key]["plans"].append({
+                "task": cleaned,
+                "category": "[매일]",
+                "done": False,
+                "date": today_str,
+            })
+            added_count += 1
+
+    if added_count == 0:
+        await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/routine 영단어 30개 암기`", parse_mode="Markdown")
+        return
+
+    plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
+    await update.message.reply_text(
+        f"🔄 **{added_count}개의 [매일] 루틴이 추가되었습니다!**\n\n"
+        f"-------------------------\n"
+        f"{plan_text}",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+
+async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    data = topic_plans.get(key, {})
+    plans = data.get("plans", [])
+
+    text_content = update.message.text.strip()
+    raw_input = re.sub(r"^/(edit_routine|edit)\s*", "", text_content).strip()
+
+    if "->" not in raw_input:
+        await update.message.reply_text("💡 형식: `/edit 기존루틴 -> 새루틴`", parse_mode="Markdown")
+        return
+
+    old_name, new_name = [x.strip() for x in raw_input.split("->", 1)]
+
+    modified_count = 0
+    for p in plans:
+        if "[매일]" in p.get("category", "") and p["task"] == old_name:
+            p["task"] = new_name
+            modified_count += 1
+
+    if modified_count > 0:
+        plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
+        await update.message.reply_text(
+            f"✏️ **루틴 수정 완료!** `{old_name}` ➔ `{new_name}`\n\n-------------------------\n{plan_text}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(f"❌ `{old_name}` 항목을 찾을 수 없습니다.", parse_mode="Markdown")
+
+
+async def list_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    text, reply_markup = build_plan_view(key, show_all_buttons=True)
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    weekly_text, reply_markup = build_weekly_view(key)
+    await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "noop":
+        return
+
+    chat_id = query.message.chat.id
+    thread_id = query.message.message_thread_id if query.message.message_thread_id else 0
+    key = (chat_id, thread_id)
+    data = query.data
+
+    if data.startswith("reset_"):
+        if data == "reset_tasks":
+            if key in topic_plans:
+                plans = topic_plans[key].get("plans", [])
+                topic_plans[key]["plans"] = [p for p in plans if "[매일]" in p.get("category", "")]
+            await query.edit_message_text("🧹 **일반 할 일만 초기화되었습니다.**", parse_mode="Markdown")
+        elif data == "reset_routines":
+            if key in topic_plans:
+                plans = topic_plans[key].get("plans", [])
+                topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
+            await query.edit_message_text("🧹 **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
+        elif data == "reset_all":
+            if key in topic_plans:
+                topic_plans[key]["plans"] = []
+            await query.edit_message_text("🧹 **모든 공부 계획과 루틴이 초기화되었습니다.**", parse_mode="Markdown")
+        elif data == "reset_cancel":
+            await query.edit_message_text("❌ 초기화가 취소되었습니다.")
+        return
+
+    if data.startswith("toggle_"):
+        idx = int(data.split("_")[1])
+        topic_data = topic_plans.get(key, {})
+        plans = topic_data.get("plans", [])
+
+        if 0 <= idx < len(plans):
+            target_item = plans[idx]
+            was_done = target_item["done"]
+            target_item["done"] = not was_done
+
+            if target_item.get("is_bible") and not was_done:
+                curr_ch_idx = target_item.get("bible_ch_idx", 0)
+                chunk_size = topic_data.get("bible_chunk", 4)
+                
+                curr_start_book, _ = ALL_BIBLE_CHAPTERS[curr_ch_idx]
+                next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
+                next_start_book, _ = ALL_BIBLE_CHAPTERS[next_ch_idx]
+
+                if curr_start_book != next_start_book:
+                    full_name = get_full_book_name(curr_start_book)
+                    next_full_name = get_full_book_name(next_start_book)
+                    
+                    status_board_text = generate_bible_status_text(next_ch_idx)
+                    congrat_msg = (
+                        f"🎉 **축하합니다! [{full_name}] 묵상을 완독하셨습니다!** 👏✨\n\n"
+                        f"끝까지 완수해내신 열정을 응원합니다!\n"
+                        f"다음 권인 **[{next_full_name}]**도 힘차게 이어나가 보세요! 🔥\n\n"
+                        f"-------------------------\n"
+                        f"{status_board_text}"
+                    )
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        message_thread_id=thread_id if thread_id != 0 else None,
+                        text=congrat_msg,
+                        parse_mode="Markdown"
+                    )
+
+            original_text = query.message.text or ""
+            if "정산 리포트" in original_text or "누적 통계" in original_text:
+                text, reply_markup = build_weekly_view(key)
+            else:
+                target_indices = []
+                if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
+                    for row in query.message.reply_markup.inline_keyboard:
+                        for btn in row:
+                            if btn.callback_data and btn.callback_data.startswith("toggle_"):
+                                try:
+                                    b_idx = int(btn.callback_data.split("_")[1])
+                                    target_indices.append(b_idx)
+                                except ValueError:
+                                    pass
+
+                if not target_indices:
+                    target_indices = None
+
+                if "미완료 점검 알림" in original_text:
+                    uncompleted_indices = [i for i, p in enumerate(plans) if not p["done"]]
+                    if not uncompleted_indices:
+                        text = "🥳 **오늘의 미완료 할 일을 모두 완수하셨습니다! 수고하셨습니다!** ✨"
+                        reply_markup = None
+                    else:
+                        text, reply_markup = build_plan_view(key, show_all_buttons=False, target_indices=uncompleted_indices)
+                        text = f"🔔 **[오늘의 미완료 점검 알림]**\n\n{text}"
+                else:
+                    text, reply_markup = build_plan_view(key, show_all_buttons=True, target_indices=target_indices)
+                    if "-------------------------" in original_text:
+                        header = original_text.split("-------------------------")[0]
+                        text = f"{header}-------------------------\n{text}"
+
+            try:
+                await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    print(f"메시지 수정 예외: {e}")
+
+
+async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    data = topic_plans.get(key, {})
+    plans = data.get("plans", [])
+
+    if not plans:
+        await update.message.reply_text("📋 초기화할 공부 계획이 없습니다.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton("📋 일반 할 일만 초기화", callback_data="reset_tasks")],
+        [InlineKeyboardButton("🔄 [매일] 루틴만 초기화", callback_data="reset_routines")],
+        [InlineKeyboardButton("💥 전체 초기화", callback_data="reset_all")],
+        [InlineKeyboardButton("❌ 취소", callback_data="reset_cancel")],
+    ]
+    await update.message.reply_text("🧹 **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
+    
+    for key, data in topic_plans.items():
+        user_notify_time = data.get("notify_time")
+        if user_notify_time and user_notify_time == now_str:
+            chat_id, thread_id = key
+            plans = data.get("plans", [])
+            
+            uncompleted_indices = [i for i, p in enumerate(plans) if not p["done"]]
+            
+            if not uncompleted_indices:
+                msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+                reply_markup = None
+            else:
+                plan_text, reply_markup = build_plan_view(key, show_all_buttons=False, target_indices=uncompleted_indices)
+                msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n{plan_text}"
+
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    message_thread_id=thread_id if thread_id != 0 else None,
+                    text=msg,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                print(f"맞춤 알림 발송 실패 ({key}): {e}")
+
+
+async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
+    for key, data in topic_plans.items():
+        chat_id, thread_id = key
+        weekly_text, reply_markup = build_weekly_view(key)
+        
+        msg = (
+            "🔔 **[토요일 주간 정산 및 점검 리포트]**\n\n"
+            + weekly_text
+            + "\n\n💡 *미완료된 항목은 일요일 자정에 자동으로 다음 것으로 이월됩니다!*"
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=thread_id if thread_id != 0 else None,
+            text=msg,
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=thread_id if thread_id != 0 else None,
+            text=WEEKLY_TASK_PROMPT_MSG,
+            parse_mode="Markdown",
+        )
+
+
+async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    today_str = now.strftime("%m/%d")
+    today_weekday_kor = WEEKDAY_KOR[now.weekday()]
+    
+    for key, data in topic_plans.items():
+        plans = data.get("plans", [])
+        
+        routine_tasks = list(dict.fromkeys([p["task"] for p in plans if "[매일]" in p.get("category", "") and p.get("is_bible") != True]))
+        for task_name in routine_tasks:
+            plans.append({
+                "task": task_name,
+                "category": "[매일]",
+                "done": False,
+                "date": today_str,
+            })
+
+        weekly_tasks_dict = data.get("weekly_tasks", {})
+        if today_weekday_kor in weekly_tasks_dict:
+            for task_name in weekly_tasks_dict[today_weekday_kor]:
+                plans.append({
+                    "task": task_name,
+                    "category": f"[{today_weekday_kor}요일 과제]",
+                    "done": False,
+                    "date": today_str,
+                })
+
+        bible_plans = [p for p in plans if p.get("is_bible") == True]
+        if bible_plans:
+            last_bible = bible_plans[-1]
+            if last_bible["done"]:
+                curr_ch_idx = data.get("bible_ch_idx", 0)
+                chunk_size = data.get("bible_chunk", 4)
+                
+                next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
+                data["bible_ch_idx"] = next_ch_idx
+                next_label = get_bible_label(next_ch_idx, chunk_size)
+
+                plans.append({
+                    "task": f"성경 묵상: {next_label}",
+                    "category": "[매일]",
+                    "done": False,
+                    "date": today_str,
+                    "is_bible": True,
+                    "bible_ch_idx": next_ch_idx
+                })
+
+
+async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
+    for key, data in topic_plans.items():
+        plans = data.get("plans", [])
+        
+        uncompleted_plans = [p for p in plans if not p["done"]]
+        topic_plans[key]["plans"] = uncompleted_plans
+        topic_plans[key]["weekly_tasks"] = {}
+
+
+async def post_init(application):
+    commands = [
+        BotCommand("start", "봇 시작 및 사용법 보기"),
+        BotCommand("routine", "매일 반복할 루틴 등록"),
+        BotCommand("weekly_task", "요일별 반복 과제/업무 등록"),
+        BotCommand("time", "일일 미완료 점검 알림 시간 설정 (예: /time 22:00)"),
+        BotCommand("bible_pages", "하루 읽을 장수 설정 (예: /bible_pages 5)"),
+        BotCommand("bible_start", "성경 묵상 시작점 지정 (예: /bible_start 창 1장)"),
+        BotCommand("bible_status", "성경 66권 완독 현황판 보기 (🐥/🐣/🥚)"),
+        BotCommand("edit", "등록된 매일 루틴 수정"),
+        BotCommand("list", "오늘의 남은 공부/성경 체크박스 확인"),
+        BotCommand("weekly", "주간 공부/성경 달성률 리포트"),
+        BotCommand("reset", "계획 초기화"),
+    ]
+    await application.bot.set_my_commands(commands)
+
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+
+def run_health_check_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    threading.Thread(target=run_health_check_server, daemon=True).start()
+
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("routine", add_routine))
+    app.add_handler(CommandHandler("weekly_task", add_weekly_task))
+    app.add_handler(CommandHandler("time", set_notify_time))
+    app.add_handler(CommandHandler("bible_pages", bible_pages))
+    app.add_handler(CommandHandler("bible_start", bible_start))
+    app.add_handler(CommandHandler("bible_status", bible_status))
+    app.add_handler(CommandHandler(["edit", "edit_routine"], edit_routine))
+    app.add_handler(CommandHandler(["list", "ls"], list_plans))
+    app.add_handler(CommandHandler("weekly", weekly_plans))
+    app.add_handler(CommandHandler("reset", reset_plans))
+    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    job_queue = app.job_queue
+    tz = pytz.timezone("Asia/Seoul")
+
+    midnight_time = datetime.datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).time()
+    sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=tz)
+
+    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(6,))
+    job_queue.run_daily(daily_routine_reset_job, time=midnight_time)
+    job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(0,))
+    
+    job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
+
+    print("🤖 봇 및 스케줄러가 정상 실행 중입니다...")
+    app.run_polling()
