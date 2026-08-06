@@ -76,7 +76,7 @@ def generate_bible_status_text(current_ch_idx):
         current_global_idx += total_ch
 
         if idx == 39:
-            msg += "\n✝️ **[신약 27권]**\n"
+            msg += "\n\n✝️ **[신약 27권]**\n"
 
         if current_ch_idx > book_end_idx:
             status_icon = "🐥"
@@ -118,7 +118,7 @@ WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
 topic_plans = {}
 
 WEEKLY_TASK_PROMPT_MSG = (
-    "📝 **[새로운 한 주, 주간 반복 과제 설정]**\n\n"
+    "📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
     "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
     "**💡 작성 예시:**\n"
     "`/weekly_task` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n"
@@ -251,7 +251,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if added_summary:
         await update.message.reply_text(
-            "📅 **주간 반복 과제가 새롭게 세팅되었습니다!**\n"
+            "📅 **주간 과제가 새롭게 세팅되었습니다!**\n"
             "해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n\n" + "\n".join(added_summary),
             parse_mode="Markdown"
         )
@@ -806,6 +806,30 @@ async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🧹 **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+# 🌅 매일 아침 08:00 일일 계획 작성 독려 알림
+async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    for key, data in topic_plans.items():
+        chat_id, thread_id = key
+        plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
+        
+        msg = (
+            "🌅 **[좋은 아침입니다! 오늘 하루도 힘차게 시작해 봐요!]**\n\n"
+            "오늘 달성할 공부 계획이나 할 일을 채팅창에 입력해 보세요!\n\n"
+            "-------------------------\n"
+            f"{plan_text}"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                message_thread_id=thread_id if thread_id != 0 else None,
+                text=msg,
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"아침 알림 발송 실패 ({key}): {e}")
+
+
 async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
     
@@ -971,8 +995,10 @@ if __name__ == "__main__":
     tz = pytz.timezone("Asia/Seoul")
 
     midnight_time = datetime.datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).time()
+    morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
     sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=tz)
 
+    job_queue.run_daily(morning_reminder_job, time=morning_time)
     job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(6,))
     job_queue.run_daily(daily_routine_reset_job, time=midnight_time)
     job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(0,))
