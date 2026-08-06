@@ -173,7 +173,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
-# 📢 [관리자 전용] 선택적 공지 발송 명령어 (/broadcast)
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
     user_id = update.effective_user.id
@@ -271,7 +270,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# 📊 [관리자 전용] 공지 과제 결과 리포트 조회 (/broadcast_report)
 async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -352,9 +350,13 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# 🛠️ 당일 요일 등록 시 즉시 오늘 할 일에도 노출되도록 보완된 weekly_task
 async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    today_str = now.strftime("%m/%d")
+    today_weekday_kor = WEEKDAY_KOR[now.weekday()]
 
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/weekly_task\s*", "", text_content).strip()
@@ -390,10 +392,27 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             topic_plans[key]["weekly_tasks"][d] = list(dict.fromkeys(topic_plans[key]["weekly_tasks"][d]))
             added_summary.append(f"• **{d}요일:** {', '.join(tasks)}")
 
+            # 💡 등록한 요일이 '오늘'과 같다면 즉시 오늘 할 일(plans) 목록에 실시간 추가!
+            if d == today_weekday_kor:
+                existing_tasks = [p["task"] for p in topic_plans[key]["plans"] if p.get("category") == f"[{d}요일 과제]"]
+                for t in tasks:
+                    if t not in existing_tasks:
+                        topic_plans[key]["plans"].append({
+                            "task": t,
+                            "category": f"[{d}요일 과제]",
+                            "done": False,
+                            "date": today_str,
+                        })
+
     if added_summary:
+        plan_text, reply_markup = build_plan_view(key, show_all_buttons=True)
         await update.message.reply_text(
-            "📅 **주간 과제가 새롭게 세팅되었습니다!**\n"
-            "해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n\n" + "\n".join(added_summary),
+            f"📅 **주간 과제가 세팅되었습니다!**\n"
+            f"오늘 요일과 일치하는 과제는 목록에 즉시 반영되었습니다.\n\n"
+            + "\n".join(added_summary) + "\n\n"
+            f"-------------------------\n"
+            f"{plan_text}",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     else:
@@ -1113,9 +1132,7 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
 
 
-# 🔒 사용자별 메뉴 목록 설정
 async def post_init(application):
-    # 1. 일반 사용자 기본 명령어 목록 (공지 명령어 미노출)
     user_commands = [
         BotCommand("start", "봇 시작 및 사용법 보기"),
         BotCommand("routine", "매일 반복할 루틴 등록"),
@@ -1131,13 +1148,11 @@ async def post_init(application):
     ]
     await application.bot.set_my_commands(user_commands)
 
-    # 2. 관리자 전용 명령어 목록 (broadcast 및 broadcast_report 포함)
     admin_commands = user_commands + [
         BotCommand("broadcast", "[관리자] 전체 독립 공지 과제 발송"),
         BotCommand("broadcast_report", "[관리자] 공지 과제 수행 결과 리포트 조회"),
     ]
     
-    # 관리자 ID 대화방에만 관리자 전용 메뉴 등록
     try:
         await application.bot.set_my_commands(
             admin_commands,
