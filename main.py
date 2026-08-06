@@ -5,7 +5,7 @@ import re
 import pytz
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -265,7 +265,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"독립 공지 발송 실패 ({t_key}): {e}")
 
     await update.message.reply_text(
-        f"✅ 총 **{success_count}개**의 채팅방/토픽에 공지를 발송했습니다!\n"
+        f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
         f"🚫 제외된 채팅방(자료방 등): **{skipped_count}개**\n"
         f"📊 리포트 확인: `/broadcast_report`"
     )
@@ -1113,9 +1113,10 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
 
 
-# 🔒 자동완성 메뉴 목록 (관리자 전용 명령어인 broadcast 및 broadcast_report는 미노출)
+# 🔒 사용자별 메뉴 목록 설정
 async def post_init(application):
-    commands = [
+    # 1. 일반 사용자 기본 명령어 목록 (공지 명령어 미노출)
+    user_commands = [
         BotCommand("start", "봇 시작 및 사용법 보기"),
         BotCommand("routine", "매일 반복할 루틴 등록"),
         BotCommand("weekly_task", "요일별 반복 과제/업무 등록"),
@@ -1128,7 +1129,22 @@ async def post_init(application):
         BotCommand("weekly", "주간 공부/성경 달성률 리포트"),
         BotCommand("reset", "계획 초기화"),
     ]
-    await application.bot.set_my_commands(commands)
+    await application.bot.set_my_commands(user_commands)
+
+    # 2. 관리자 전용 명령어 목록 (broadcast 및 broadcast_report 포함)
+    admin_commands = user_commands + [
+        BotCommand("broadcast", "[관리자] 전체 독립 공지 과제 발송"),
+        BotCommand("broadcast_report", "[관리자] 공지 과제 수행 결과 리포트 조회"),
+    ]
+    
+    # 관리자 ID 대화방에만 관리자 전용 메뉴 등록
+    try:
+        await application.bot.set_my_commands(
+            admin_commands,
+            scope=BotCommandScopeChat(chat_id=ADMIN_ID)
+        )
+    except Exception as e:
+        print(f"관리자 전용 메뉴 등록 실패 (ADMIN_ID 확인 필요): {e}")
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
