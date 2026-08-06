@@ -91,21 +91,19 @@ def generate_bible_status_text(current_ch_idx):
     return msg
 
 WELCOME_MESSAGES = [
-    """👋 **반갑습니다! 공부 및 성경 읽기 계획 봇 안내** 📝
-
-• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)
-• **매일 루틴 등록:** `/routine [내용]` ➔ 매일 반복 루틴
-• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 반복 과제
-• **알림 시간 설정:** `/time [시:분]` (예: `/time 22:00` / 끄기: `/time off`)
-• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)
-• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)
-• **성경 66권 현황판:** `/bible_status` (완료: 🐥 / 읽는중: 🐣 / 미완료: 🥚)
-• **질문:** `질문: [내용]` (1:1 비공개) / `전체질문: [내용]` (공개)
-• `/list` : 오늘의 남은 공부 및 성경 체크박스
-• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트
-• `/reset` : 계획 초기화
-
-✨ 오늘 달성할 계획을 입력하거나 성경 읽기를 시작해 보세요!"""
+    "👋 **반갑습니다! 공부 및 성경 읽기 계획 봇 안내** 📝\n\n"
+    "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
+    "• **매일 루틴 등록:** `/routine [내용]` ➔ 매일 반복 루틴\n"
+    "• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 반복 과제\n"
+    "• **알림 시간 설정:** `/time [시:분]` (예: `/time 22:00` / 끄기: `/time off`)\n"
+    "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
+    "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
+    "• **성경 66권 현황판:** `/bible_status` (완료: 🐥 / 읽는중: 🐣 / 미완료: 🥚)\n"
+    "• **질문:** `질문: [내용]` (1:1 비공개) / `전체질문: [내용]` (공개)\n"
+    "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
+    "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
+    "• `/reset` : 계획 초기화\n\n"
+    "✨ 오늘 달성할 계획을 입력하거나 성경 읽기를 시작해 보세요!"
 ]
 
 CHEERING_MESSAGES = [
@@ -119,9 +117,130 @@ CHEERING_MESSAGES = [
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
 topic_plans = {}
 
-WEEKLY_TASK_PROMPT_MSG = """📝 **[새로운 한 주, 주간 반복 과제 설정]**
+WEEKLY_TASK_PROMPT_MSG = (
+    "📝 **[새로운 한 주, 주간 반복 과제 설정]**\n\n"
+    "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
+    "**💡 작성 예시:**\n"
+    "`/weekly_task` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n"
+    "```\n"
+    "/weekly_task\n"
+    "월: 과제 제출, 데이터 분석 강의\n"
+    "수: 알고리즘 스터디\n"
+    "금: 주간 보고서 작성\n"
+    "```"
+)
 
-이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!
 
-**💡 작성 예시:**
-`/weekly_task` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.
+def get_topic_key(update: Update):
+    chat_id = update.effective_chat.id
+    thread_id = (
+        update.effective_message.message_thread_id
+        if update.effective_message and update.effective_message.message_thread_id
+        else 0
+    )
+    return (chat_id, thread_id)
+
+
+def get_korean_date_str():
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    weekday_str = WEEKDAY_KOR[now.weekday()]
+    return now.strftime(f"%m월 %d일 ({weekday_str})")
+
+
+def get_korean_week_range_str():
+    tz = pytz.timezone("Asia/Seoul")
+    now = datetime.datetime.now(tz)
+    idx = (now.weekday() + 1) % 7
+    sun = now - datetime.timedelta(days=idx)
+    sat = sun + datetime.timedelta(days=6)
+    
+    sun_str = f"{sun.strftime('%m월 %d일')} (일)"
+    sat_str = f"{sat.strftime('%m월 %d일')} (토)"
+    return f"{sun_str} ~ {sat_str}"
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+
+    welcome_text = random.choice(WELCOME_MESSAGES)
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+
+
+async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+    raw_args = " ".join(context.args).strip() if context.args else ""
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+
+    if not raw_args:
+        curr_time = topic_plans[key].get("notify_time")
+        status = f"현재 설정된 알림 시간: **{curr_time}**" if curr_time else "현재 알림이 설정되어 있지 않습니다."
+        await update.message.reply_text(
+            f"⏰ **일일 계획 점검 알림 시간 설정**\n\n"
+            f"{status}\n\n"
+            f"**사용 예시:**\n"
+            f"• `/time 22:00` (매일 밤 10시 알림)\n"
+            f"• `/time 08:30` (매일 아침 8시 30분 알림)\n"
+            f"• `/time off` (알림 해제)",
+            parse_mode="Markdown"
+        )
+        return
+
+    if raw_args.lower() in ["off", "끄기", "해제"]:
+        topic_plans[key]["notify_time"] = None
+        await update.message.reply_text("🔕 **일일 계획 점검 알림이 해제되었습니다.**", parse_mode="Markdown")
+        return
+
+    time_match = re.match(r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$", raw_args)
+    if not time_match:
+        await update.message.reply_text("❌ 올바른 시간 형식이 아닙니다. `24시간 형식(HH:MM)`으로 입력해 주세요. (예: `/time 22:00`)", parse_mode="Markdown")
+        return
+
+    formatted_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}"
+    topic_plans[key]["notify_time"] = formatted_time
+
+    await update.message.reply_text(
+        f"🔔 **매일 `{formatted_time}`에 미완료 공부 및 성경 점검 알림이 발송됩니다!**",
+        parse_mode="Markdown"
+    )
+
+
+async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+
+    text_content = update.message.text.strip()
+    raw_input = re.sub(r"^/weekly_task\s*", "", text_content).strip()
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+
+    if not raw_input:
+        await update.message.reply_text(WEEKLY_TASK_PROMPT_MSG, parse_mode="Markdown")
+        return
+
+    lines = raw_input.split("\n")
+    added_summary = []
+    
+    if "weekly_tasks" not in topic_plans[key]:
+        topic_plans[key]["weekly_tasks"] = {}
+
+    for line in lines:
+        line_clean = line.strip()
+        if not line_clean or ":" not in line_clean:
+            continue
+        
+        day_part, tasks_part = line_clean.split(":", 1)
+        day_str = day_part.strip()
+        
+        valid_days = [d for d in WEEKDAY_KOR if d in day_str]
+        tasks = [t.strip() for t in tasks_part.split(",") if t.strip()]
+
+        for d in valid_days:
+            if d not in
