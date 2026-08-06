@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # ⚠️ 1. 본인의 텔레그램 숫자 ID를 입력하세요
-ADMIN_ID = 123456789
+ADMIN_ID = 75036448
 
 # ⚠️ 2. 클라우드 서버 환경변수에서 안전하게 토큰을 가져옵니다.
 TOKEN = os.environ.get("BOT_TOKEN")
