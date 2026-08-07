@@ -106,7 +106,7 @@ WELCOME_MESSAGES = [
     "• **알림 시간 설정:** `/time [시:분]` (예: `/time 22:00` / 끄기: `/time off`)\n"
     "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
     "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
-    "• **성경 66권 현황판:** `/bible_status` (완료: 🐥 / 읽는중: 🐣 / 미완료: 🥚)\n"
+    "• **성경 66권 현황판:** `/bible_status`\n"
     "• **비공개 질문:** `질문: [내용]` 또는 `비공개질문: [내용]`\n"
     "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
     "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
@@ -181,7 +181,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
-# 🛠️ 봇 비활성화 명령어 (/off)
 async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -192,14 +191,13 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = True
 
     await update.message.reply_text(
-        "🔕 **이 토픽에서 봇의 자동 할 일 등록 기능이 비활성화되었습니다.**\n\n"
-        "자유롭게 메시지나 광고글을 나누실 수 있습니다.\n"
+        "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
+        "자유롭게 메시지나 광고글을 나누실 수 있으며, 전체 공지 과제(/broadcast) 수신 대상에서도 제외됩니다.\n"
         "다시 켜시려면 `/on`을 입력해 주세요!",
         parse_mode="Markdown"
     )
 
 
-# 🛠️ 봇 재활성화 명령어 (/on)
 async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -210,12 +208,13 @@ async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = False
 
     await update.message.reply_text(
-        "🔔 **이 토픽에서 봇의 자동 할 일 등록 기능이 다시 활성화되었습니다!**\n\n"
-        "이제 작성하시는 일반 메시지가 오늘 할 일로 등록됩니다.",
+        "🔔 **이 토픽에서 봇 기능이 다시 활성화되었습니다!**\n\n"
+        "이제 작성하시는 일반 메시지가 오늘 할 일로 등록되며, 전체 공지 과제를 수신합니다.",
         parse_mode="Markdown"
     )
 
 
+# 🛠️ 비활성화(/off) 토픽 발송 제외 로직이 보완된 broadcast_task
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
     user_id = update.effective_user.id
@@ -235,7 +234,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "📢 **[독립 공지 과제 발송 방법]**\n\n"
             "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n"
-            "(선택: 상단에 `제외: 광고, 공지` 입력 시 특정 토픽 제외 가능)\n\n"
+            "(선택: 상단에 `제외: 광고, 공지` 입력 시 특정 키워드 토픽 제외 가능 / `/off` 설정 토픽은 자동 제외)\n\n"
             "**작성 예시:**\n"
             "```\n"
             "/broadcast 제외: 광고, 공지\n"
@@ -300,6 +299,11 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info = topic_plans.get(t_key, {})
         u_name = user_info.get("user_name", "")
 
+        # 🛑 /off 설정으로 비활성화된 토픽 제외
+        if user_info.get("disabled", False):
+            skipped_count += 1
+            continue
+
         if any(keyword in u_name for keyword in exclude_keywords):
             skipped_count += 1
             continue
@@ -320,7 +324,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
-        f"🚫 제외된 채팅방/토픽 (제외 키워드: {', '.join(exclude_keywords)}): **{skipped_count}개**\n"
+        f"🚫 제외된 채팅방/토픽 (/off 설정 및 제외 키워드): **{skipped_count}개**\n"
         f"📊 리포트 확인: `/broadcast_report`"
     )
 
@@ -400,7 +404,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     topic_plans[key]["notify_time"] = formatted_time
 
     await update.message.reply_text(
-        f"🔔 **매일 `{formatted_time}`에 미완료 공부 및 성경 점검 알림이 발송됩니다!**",
+        f"🔔 **매일 `{formatted_time}`에 오늘의 공부 및 성경 점검 알림이 발송됩니다!**",
         parse_mode="Markdown"
     )
 
@@ -747,7 +751,6 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
-# 🛠️ 비활성화 상태 체크가 추가된 handle_message
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -755,15 +758,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
 
-    # 1. 슬래시(/) 명령어 입력 시 일반 메시지 처리 방지
     if text.startswith("/"):
         return
 
-    # 🛑 2. 비활성화된 토픽(/off)에서는 할 일 자동 등록 무시
     if key in topic_plans and topic_plans[key].get("disabled", False):
         return
 
-    # 🔒 3. 비공개 질문 처리 (관리자에게만 1:1 전달)
     if text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
         question_text = re.sub(r"^(비공개질문|질문)[:\s]*", "", text).strip()
         if not question_text:
@@ -1148,12 +1148,12 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             
             uncompleted_indices = [i for i, p in enumerate(plans) if not p["done"]]
             
-            if not uncompleted_indices:
-                msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+            if not uncompleted_indices and len(plans) > 0:
+                msg = f"🔔 **[오늘의 공부 점검 알림 - {now_str}]**\n\n🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
                 reply_markup = None
             else:
                 plan_text, reply_markup = build_plan_view(key)
-                msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n{plan_text}"
+                msg = f"🔔 **[오늘의 공부 점검 알림 - {now_str}]**\n\n{plan_text}"
 
             try:
                 await context.bot.send_message(
