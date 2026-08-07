@@ -3,6 +3,7 @@ import datetime
 import random
 import re
 import pytz
+import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -509,8 +510,8 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ 카테고리 내 모든 과제가 완료되었을 때만 해당 섹션이 숨겨지도록 구현된 build_plan_view
-def build_plan_view(key):
+# 🛠️ show_all_completed 옵션 추가 (까마귀 아이콘 유지 모드 vs 완료 섹션 자동 숨김 모드)
+def build_plan_view(key, show_all_completed=False):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
 
@@ -567,7 +568,6 @@ def build_plan_view(key):
             f"버튼을 누르면 완료 상태로 전환되며, 카테고리의 모든 일을 마치면 섹션이 자동으로 정돈됩니다.\n"
         )
 
-    # 카테고리별 완료 여부 조사
     category_uncompleted_count = {}
     for _, item in plans_with_index:
         cat = item.get("category", "")
@@ -582,8 +582,8 @@ def build_plan_view(key):
     for real_idx, item in plans_with_index:
         category = item.get("category", "")
         
-        # 카테고리 내에 미완료된 항목이 최소 1개라도 남아있는 경우에만 버튼 노출!
-        if category_uncompleted_count.get(category, 0) > 0:
+        # show_all_completed=True 모드이거나, 미완료 항목이 남아있는 섹션만 노출
+        if show_all_completed or category_uncompleted_count.get(category, 0) > 0:
             if category and category != last_category:
                 keyboard.append(
                     [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
@@ -850,6 +850,7 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
+# 🛠️ 1초 후 지연 삭제 애니메이션 적용된 button_click
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -951,17 +952,37 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             original_text = query.message.text or ""
             if "정산 리포트" in original_text or "누적 통계" in original_text:
                 text, reply_markup = build_weekly_view(key)
+                try:
+                    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        print(f"메시지 수정 예외: {e}")
             else:
-                text, reply_markup = build_plan_view(key)
+                # 1단계: 까마귀 아이콘(🐦‍⬛️)으로 변경된 전체 상태를 먼저 출력
+                text_instant, reply_markup_instant = build_plan_view(key, show_all_completed=True)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
-                    text = f"{header}-------------------------\n{text}"
+                    text_instant = f"{header}-------------------------\n{text_instant}"
 
-            try:
-                await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-            except Exception as e:
-                if "Message is not modified" not in str(e):
-                    print(f"메시지 수정 예외: {e}")
+                try:
+                    await query.edit_message_text(text_instant, reply_markup=reply_markup_instant, parse_mode="Markdown")
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        print(f"메시지 수정 예외: {e}")
+
+                # 2단계: 1초 동안 까마귀 상태를 보여준 뒤, 완수된 섹션을 정리하여 업데이트
+                await asyncio.sleep(1)
+
+                text_final, reply_markup_final = build_plan_view(key, show_all_completed=False)
+                if "-------------------------" in original_text:
+                    header = original_text.split("-------------------------")[0]
+                    text_final = f"{header}-------------------------\n{text_final}"
+
+                try:
+                    await query.edit_message_text(text_final, reply_markup=reply_markup_final, parse_mode="Markdown")
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        print(f"메시지 최종 수정 예외: {e}")
 
 
 async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
