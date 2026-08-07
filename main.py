@@ -38,6 +38,9 @@ else:
 
 topic_plans = {}
 
+# 📢 브로드캐스트 통합 관리 및 미완료 경고용 데이터 구조
+daily_broadcast_state = {}
+
 # 💾 DB 저장 / 불러오기 함수
 def save_data():
     if not supabase:
@@ -66,7 +69,6 @@ def load_data():
             print("💾 Supabase에서 기존 데이터를 안전하게 복원했습니다!")
     except Exception as e:
         print(f"❌ 데이터 불러오기 중 오류 발생: {e}")
-
 
 # 성경 전체 권 및 장수 데이터 (구약 39권 + 신약 27권 = 총 1,189장)
 BIBLE_STRUCTURE = [
@@ -182,9 +184,6 @@ RANDOM_SURPRISE_MESSAGES = [
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
 
-broadcast_data = {}
-current_broadcast_id = 0
-
 WEEKLY_TASK_PROMPT_MSG = (
     "📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
     "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
@@ -246,7 +245,7 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
-        "자유롭게 메시지나 광고글을 나누실 수 있으며, 전체 공지 과제(/broadcast) 수신 대상에서도 제외됩니다.\n"
+        "자유롭게 메시지나 광고글을 나누실 수 있으며, 전체 공지 과제(/bc) 수신 대상에서도 제외됩니다.\n"
         "다시 켜시려면 `/on`을 입력해 주세요!",
         parse_mode="Markdown"
     )
@@ -274,15 +273,15 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text_content = update.message.text.strip()
-    raw_args = re.sub(r"^/reply\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_args = re.sub(r"^/(reply|rp)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_args or " " not in raw_args:
         await update.message.reply_text(
             "💬 **[관리자 답장 전송 방법]**\n\n"
-            "**/reply [토픽ID 또는 사용자ID] [답변 내용]**\n\n"
+            "**/rp [토픽ID 또는 사용자ID] [답변 내용]**\n\n"
             "**작성 예시:**\n"
-            "• 토픽 방 답장: `/reply 12345 안녕하세요.`\n"
-            "• 1:1 개인방 답장: `/reply 987654321 안녕하세요.`",
+            "• 토픽 방 답장: `/rp 12345 안녕하세요.`\n"
+            "• 1:1 개인방 답장: `/rp 987654321 안녕하세요.`",
             parse_mode="Markdown"
         )
         return
@@ -323,29 +322,22 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ 답변 발송 실패: {e}\n(상대방이 봇을 차단했거나 ID가 올바르지 않은지 확인해 주세요.)")
 
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_broadcast_id
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
         await update.message.reply_text("❌ 관리자만 사용할 수 있는 명령어입니다.")
         return
 
     admin_key = get_topic_key(update)
-    user_name = update.effective_user.first_name or "사용자"
-    if admin_key not in topic_plans:
-        topic_plans[admin_key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
-
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/broadcast\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_input = re.sub(r"^/(broadcast|bc)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_input:
         await update.message.reply_text(
-            "📢 **[독립 공지 과제 발송 방법]**\n\n"
-            "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n"
-            "(선택: 상단에 `제외: 광고, 공지` 입력 시 특정 키워드 토픽 제외 가능 / `/off` 설정 토픽은 자동 제외)\n\n"
+            "📢 **[통합 공지 과제 추가 발송 방법]**\n\n"
+            "**/bc [과제 내용]**을 입력하시면 오늘 발송된 기존 공지 체크박스 아래에 추가로 합쳐집니다!\n\n"
             "**작성 예시:**\n"
             "```\n"
-            "/broadcast 제외: 광고, 공지\n"
-            "[전체 필수 공지 과제]\n"
+            "/bc\n"
             "주간 질문 작성하기\n"
             "공지사항 숙지 및 체크하기\n"
             "```",
@@ -354,49 +346,15 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = raw_input.split("\n")
-    title = "[전체 공지 과제]"
-    tasks = []
-    exclude_keywords = ["광고", "공지", "자료", "자료방", "광고방", "공지방"]
-
-    for line in lines:
-        raw_line = line.strip()
-        if not raw_line:
-            continue
-        
-        if raw_line.startswith("제외:"):
-            ex_str = raw_line.replace("제외:", "").strip()
-            custom_excludes = [k.strip() for k in ex_str.split(",") if k.strip()]
-            if custom_excludes:
-                exclude_keywords = custom_excludes
-            continue
-
-        cat_match = re.search(r"^\[\s*(.*?)\s*\]$", raw_line)
-        if cat_match:
-            title = f"[{cat_match.group(1).strip()}]"
-        else:
-            tasks.append(raw_line)
-
-    if not tasks:
+    new_tasks = [line.strip() for line in lines if line.strip() and not line.strip().startswith("제외:")]
+    
+    if not new_tasks:
         await update.message.reply_text("❌ 추가할 과제 항목을 입력해 주세요.")
         return
 
-    current_broadcast_id += 1
-    bc_id = current_broadcast_id
-
-    broadcast_data[bc_id] = {
-        "title": title,
-        "tasks": tasks,
-        "records": {}
-    }
-
-    keyboard = []
-    for t_idx, task in enumerate(tasks):
-        keyboard.append([InlineKeyboardButton(f"🥚 {task}", callback_data=f"bctoggle_{bc_id}_{t_idx}")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     success_count = 0
-    skipped_count = 0
-    msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
+    exclude_keywords = ["광고", "공지", "자료", "자료방", "광고방", "공지방"]
+    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%Y-%m-%d")
 
     for t_key in list(topic_plans.keys()):
         if t_key == admin_key:
@@ -406,33 +364,58 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info = topic_plans.get(t_key, {})
         u_name = user_info.get("user_name", "")
 
-        if user_info.get("disabled", False):
-            skipped_count += 1
+        if user_info.get("disabled", False) or any(k in u_name for k in exclude_keywords):
             continue
 
-        if any(keyword in u_name for keyword in exclude_keywords):
-            skipped_count += 1
-            continue
+        if t_key not in daily_broadcast_state:
+            daily_broadcast_state[t_key] = {
+                "message_id": None,
+                "tasks": [],
+                "records": {},
+                "created_date": today_str
+            }
 
-        broadcast_data[bc_id]["records"][t_key] = {i: False for i in range(len(tasks))}
+        state = daily_broadcast_state[t_key]
+        
+        start_idx = len(state["tasks"])
+        state["tasks"].extend(new_tasks)
+        for i in range(start_idx, len(state["tasks"])):
+            state["records"][i] = False
+
+        keyboard = []
+        for idx, task in enumerate(state["tasks"]):
+            is_done = state["records"].get(idx, False)
+            icon = "🐦‍⬛️" if is_done else "🥚"
+            keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_merged_{idx}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        msg_text = "📢 **[전체 공지 과제 목록]**\n\n아래 과제들을 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                message_thread_id=thread_id if thread_id != 0 else None,
-                text=msg,
-                reply_markup=reply_markup,
-                parse_mode="Markdown"
-            )
+            if state["message_id"]:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_thread_id=thread_id if thread_id != 0 else None,
+                    message_id=state["message_id"],
+                    text=msg_text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+            else:
+                sent_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    message_thread_id=thread_id if thread_id != 0 else None,
+                    text=msg_text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+                state["message_id"] = sent_msg.message_id
+            
             success_count += 1
         except Exception as e:
-            print(f"독립 공지 발송 실패 ({t_key}): {e}")
+            print(f"통합 공지 발송/수정 실패 ({t_key}): {e}")
 
-    await update.message.reply_text(
-        f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
-        f"🚫 제외된 채팅방/토픽 (/off 설정 및 제외 키워드): **{skipped_count}개**\n"
-        f"📊 리포트 확인: `/broadcast_report`"
-    )
+    await update.message.reply_text(f"✅ 총 **{success_count}개** 방의 공지 체크박스에 새 과제가 추가/합쳐졌습니다!")
 
 async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -440,20 +423,13 @@ async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 관리자만 사용할 수 있는 명령어입니다.")
         return
 
-    if not broadcast_data:
+    if not daily_broadcast_state:
         await update.message.reply_text("📊 아직 발송된 전체 공지 과제가 없습니다.")
         return
 
-    bc_id = max(broadcast_data.keys())
-    data = broadcast_data[bc_id]
-    
-    title = data["title"]
-    tasks = data["tasks"]
-    records = data["records"]
+    report_msg = "📊 **[전체 공지 과제 수행 결과 리포트]**\n\n"
 
-    report_msg = f"📊 **[{title} - 수행 결과 리포트]**\n\n"
-
-    for key, task_records in records.items():
+    for key, state in daily_broadcast_state.items():
         chat_id, thread_id = key
         user_info = topic_plans.get(key, {})
         user_name = user_info.get("user_name", f"사용자 ({chat_id})")
@@ -464,8 +440,11 @@ async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         report_msg += f"👤 **{location_str}**\n"
 
+        tasks = state.get("tasks", [])
+        records = state.get("records", {})
+
         for t_idx, task in enumerate(tasks):
-            is_done = task_records.get(t_idx, False)
+            is_done = records.get(t_idx, False)
             status_icon = "✅ 완료" if is_done else "❌ 미완료"
             report_msg += f"  • {task}: `{status_icon}`\n"
         report_msg += "\n"
@@ -1039,48 +1018,29 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
         return
 
-    if data.startswith("bctoggle_"):
+    if data.startswith("bctoggle_merged_"):
         await query.answer()
-        parts = data.split("_")
-        bc_id = int(parts[1])
-        t_idx = int(parts[2])
+        task_idx = int(data.split("_")[2])
 
-        if bc_id in broadcast_data and key in broadcast_data[bc_id]["records"]:
-            curr_val = broadcast_data[bc_id]["records"][key].get(t_idx, False)
-            broadcast_data[bc_id]["records"][key][t_idx] = not curr_val
-
-            bc_info = broadcast_data[bc_id]
-            title = bc_info["title"]
-            tasks = bc_info["tasks"]
-            user_records = bc_info["records"][key]
+        if key in daily_broadcast_state:
+            state = daily_broadcast_state[key]
+            curr_val = state["records"].get(task_idx, False)
+            state["records"][task_idx] = not curr_val
 
             keyboard = []
-            for i, task in enumerate(tasks):
-                is_done = user_records.get(i, False)
+            for idx, task in enumerate(state["tasks"]):
+                is_done = state["records"].get(idx, False)
                 icon = "🐦‍⬛️" if is_done else "🥚"
-                keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_{bc_id}_{i}")])
+                keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_merged_{idx}")])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
-            msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
+            msg_text = "📢 **[전체 공지 과제 목록]**\n\n아래 과제들을 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
             try:
-                await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
+                await query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode="Markdown")
             except Exception as e:
                 if "Message is not modified" not in str(e):
-                    print(f"공지 버튼 수정 예외: {e}")
-
-            all_done = all(user_records.get(i, False) for i in range(len(tasks)))
-            if all_done and len(tasks) > 0:
-                congrat_bc_msg = f"🎉 **축하합니다! {title}의 모든 과제를 완수하셨습니다!** 👏✨"
-                try:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        message_thread_id=thread_id if thread_id != 0 else None,
-                        text=congrat_bc_msg,
-                        parse_mode="Markdown"
-                    )
-                except Exception as e:
-                    print(f"공지 완수 축하 메시지 발송 예외: {e}")
+                    print(f"공지 버튼 수정 실패: {e}")
         return
 
     if data.startswith("reset_"):
@@ -1253,8 +1213,12 @@ async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             print(f"아침 알림 발송 실패 ({key}): {e}")
 
 async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
-    now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
-    
+    tz = pytz.timezone("Asia/Seoul")
+    now_dt = datetime.datetime.now(tz)
+    now_str = now_dt.strftime("%H:%M")
+    yesterday_date = (now_dt - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # 1) 일반 공부 점검 알림
     for key, data in topic_plans.items():
         if data.get("disabled", False):
             continue
@@ -1282,6 +1246,34 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
+
+    # 2) ⏰ [밤 22:00] 어제 발송된 브로드캐스트 공지 과제 미완료 경고 알림 발송
+    if now_str == "22:00":
+        for key, state in daily_broadcast_state.items():
+            chat_id, thread_id = key
+            
+            created_date = state.get("created_date")
+            if created_date == yesterday_date:
+                records = state.get("records", {})
+                tasks = state.get("tasks", [])
+                
+                has_uncompleted = any(not records.get(i, False) for i in range(len(tasks)))
+                
+                if has_uncompleted:
+                    warning_msg = (
+                        "⚠️ **[어제 발송된 공지 과제 미완료 경고]** 🔔\n\n"
+                        "아직 체크되지 않은 필수 공지 과제가 남아있습니다!\n"
+                        "상단의 **[전체 공지 과제 목록]** 메시지를 확인하시고 완료된 항목을 클릭해 주세요! 💪"
+                    )
+                    try:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            message_thread_id=thread_id if thread_id != 0 else None,
+                            text=warning_msg,
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        print(f"공지 경고 메시지 발송 실패 ({key}): {e}")
 
 async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1384,37 +1376,9 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
     save_data()
 
+# 🛠️ 그룹/토픽 방에서 / 입력 시 자동완성 팝업 차단
 async def post_init(application):
-    user_commands = [
-        BotCommand("s", "봇 시작 및 사용법 보기"),
-        BotCommand("r", "매일 반복 루틴 등록"),
-        BotCommand("wt", "주간 요일별 과제 등록"),
-        BotCommand("bs", "성경 묵상 시작점 지정"),
-        BotCommand("bp", "하루 읽을 성경 장수 설정"),
-        BotCommand("st", "성경 66권 완독 현황판 보기"),
-        BotCommand("t", "일일 미완료 점검 알림 시간 설정"),
-        BotCommand("l", "오늘의 남은 공부/성경 체크박스 확인"),
-        BotCommand("w", "주간 공부/성경 달성률 리포트"),
-        BotCommand("e", "등록된 매일 루틴 수정"),
-        BotCommand("rs", "오늘 계획 초기화"),
-        BotCommand("off", "이 토픽에서 봇 비활성화"),
-        BotCommand("on", "이 토픽에서 봇 재활성화"),
-    ]
-    await application.bot.set_my_commands(user_commands)
-
-    admin_commands = user_commands + [
-        BotCommand("reply", "[관리자] 토픽 또는 사용자 ID로 답변 전송"),
-        BotCommand("broadcast", "[관리자] 전체 독립 공지 과제 발송"),
-        BotCommand("broadcast_report", "[관리자] 공지 과제 수행 결과 리포트 조회"),
-    ]
-    
-    try:
-        await application.bot.set_my_commands(
-            admin_commands,
-            scope=BotCommandScopeChat(chat_id=ADMIN_ID)
-        )
-    except Exception as e:
-        print(f"관리자 전용 메뉴 등록 실패 (ADMIN_ID 확인 필요): {e}")
+    pass
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1435,14 +1399,15 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
+    # 단축어 및 긴 명령어 매핑
     app.add_handler(CommandHandler(["start", "START", "Start", "s", "S"], start))
     app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
     app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
-    app.add_handler(CommandHandler(["reply", "REPLY", "Reply"], admin_reply))
+    app.add_handler(CommandHandler(["reply", "REPLY", "Reply", "rp", "RP"], admin_reply))
     app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine", "r", "R"], add_routine))
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task", "wt", "WT"], add_weekly_task))
-    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
-    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT"], broadcast_report))
+    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast", "bc", "BC"], broadcast_task))
+    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT", "bcr", "BCR", "bcrp"], broadcast_report))
     app.add_handler(CommandHandler(["time", "TIME", "Time", "t", "T"], set_notify_time))
     app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES", "bp", "BP"], bible_pages))
     app.add_handler(CommandHandler(["bible_start", "BIBLE_START", "bs", "BS"], bible_start))
