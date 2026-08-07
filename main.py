@@ -510,8 +510,8 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ show_all_completed 옵션 추가 (까마귀 아이콘 유지 모드 vs 완료 섹션 자동 숨김 모드)
-def build_plan_view(key, show_all_completed=False):
+# 🛠️ visible_indices 세트를 받아 현재 보이고 있는 인덱스만 렌더링하는 build_plan_view
+def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
 
@@ -582,8 +582,12 @@ def build_plan_view(key, show_all_completed=False):
     for real_idx, item in plans_with_index:
         category = item.get("category", "")
         
-        # show_all_completed=True 모드이거나, 미완료 항목이 남아있는 섹션만 노출
-        if show_all_completed or category_uncompleted_count.get(category, 0) > 0:
+        # visible_indices가 지정된 경우 해당 인덱스 세트 내의 항목만 출력,
+        # 지정되지 않은 기본 상태에서는 미완료 항목이 남아있는 섹션만 노출!
+        should_show = (visible_indices is not None and real_idx in visible_indices) or \
+                      (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
+
+        if should_show:
             if category and category != last_category:
                 keyboard.append(
                     [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
@@ -850,7 +854,7 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# 🛠️ 1초 후 지연 삭제 애니메이션 적용된 button_click
+# 🛠️ 현재 화면에 보이고 있는 키보드 인덱스만 파싱하여 지연 업데이트 수행
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -958,8 +962,23 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
-                # 1단계: 까마귀 아이콘(🐦‍⬛️)으로 변경된 전체 상태를 먼저 출력
-                text_instant, reply_markup_instant = build_plan_view(key, show_all_completed=True)
+                # 현재 메시지 버튼에 보이고 있는 toggle_ 인덱스들 추출
+                current_visible_indices = set()
+                if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
+                    for row in query.message.reply_markup.inline_keyboard:
+                        for btn in row:
+                            if btn.callback_data and btn.callback_data.startswith("toggle_"):
+                                try:
+                                    b_idx = int(btn.callback_data.split("_")[1])
+                                    current_visible_indices.add(b_idx)
+                                except ValueError:
+                                    pass
+
+                if not current_visible_indices:
+                    current_visible_indices = None
+
+                # 1단계: 현재 화면에 존재하던 버튼 범위만 그대로 유지한 채 까마귀(🐦‍⬛️)로 상태 업데이트
+                text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
                     text_instant = f"{header}-------------------------\n{text_instant}"
@@ -970,10 +989,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
 
-                # 2단계: 1초 동안 까마귀 상태를 보여준 뒤, 완수된 섹션을 정리하여 업데이트
+                # 2단계: 1초 지연 후 완수한 카테고리 및 체크박스 정돈
                 await asyncio.sleep(1)
 
-                text_final, reply_markup_final = build_plan_view(key, show_all_completed=False)
+                text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
                     text_final = f"{header}-------------------------\n{text_final}"
