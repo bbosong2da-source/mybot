@@ -6,7 +6,7 @@ import pytz
 import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommandScopeDefault, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -1396,9 +1396,13 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
     save_data()
 
-# 🛠️ 텔레그램 서버로 긴 명령어 팝업 자동등록을 완전히 비워둡니다.
+# 🛠️ 기존 등록된 기본/관리자 scope 명령어 삭제 및 초기화
 async def post_init(application):
-    pass
+    try:
+        await application.bot.delete_my_commands(scope=BotCommandScopeDefault())
+        await application.bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=ADMIN_ID))
+    except Exception as e:
+        print(f"명령어 목록 초기화 중 참고: {e}")
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
