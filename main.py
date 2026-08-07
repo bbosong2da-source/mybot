@@ -98,22 +98,23 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
-# 🛠️ 안내 메시지 (줄바꿈 및 대괄호 반영)
+# 🛠️ 새 웰컴 메시지 반영
 WELCOME_MESSAGES = [
-    "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
-    "• **할 일 등록:** 채팅창에 계획 입력\n"
-    "  ([카테고리명] 지원)\n"
+    "🐦‍⬛️✨ 반갑습니다! 주 7일의 말씀 봇 안내입니다.\n\n"
+    "• **할 일 등록:** 채팅창에 계획 보내기\n"
+    "  (줄 바꿈 > 다른 할 일)\n"
+    "  ([카테고리명] 으로 할일 구분 가능)\n"
     "• **매일 루틴:** `/r [내용]`\n"
-    "• **요일별 과제:** `/wt` [월화수목금: 내용]\n"
+    "• **요일별 과제:** `/wt [월화수목금]: 내용`\n"
     "• **알림 시간 설정:** `/t [시:분]`\n"
     "  (끄기: `/t off`)\n"
     "• **성경 하루 분량:** `/bp [장수]` (예: `/bp 5`)\n"
     "• **성경 시작점:** `/bs [분량]` (예: `/bs 창 1장`)\n"
     "• **성경 완독 현황판:** `/st`\n"
     "• **질문 보내기:** `질문: [내용]`\n"
-    "• **오늘의 할 일:** `/l` (또는 `/list`)\n"
+    "• **오늘의 할 일:** `/l` (미완료 과제)\n"
     "• **주간 리포트:** `/w`\n"
-    "• **매일 루틴 수정:** `/e`\n"
+    "• **매일 루틴 수정:** `/e (기존 > 변경)`\n"
     "• **계획 초기화:** `/rs`\n\n"
     "✨ 오늘 달성할 계획을 입력하거나 성경 읽기를 시작해 보세요!"
 ]
@@ -942,11 +943,18 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/(edit_routine|edit|e)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
-    if "->" not in raw_input:
-        await update.message.reply_text("💡 형식: `/e 기존루틴 -> 새루틴`", parse_mode="Markdown")
+    # > 또는 -> 구분을 둘 다 허용하도록 변경
+    delimiter = None
+    if ">" in raw_input:
+        delimiter = ">"
+    elif "->" in raw_input:
+        delimiter = "->"
+
+    if not delimiter:
+        await update.message.reply_text("💡 형식: `/e 기존루틴 > 새루틴`", parse_mode="Markdown")
         return
 
-    old_name, new_name = [x.strip() for x in raw_input.split("->", 1)]
+    old_name, new_name = [x.strip() for x in raw_input.split(delimiter, 1)]
 
     modified_count = 0
     for p in plans:
@@ -957,7 +965,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if modified_count > 0:
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
-            f"✏️ **루틴 수정 완료!** `{old_name}` ➔ `{new_name}`\n\n-------------------------\n{plan_text}",
+            f"✏️ **루틴 수정 완료!** `{old_name}` > `{new_name}`\n\n-------------------------\n{plan_text}",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -1074,7 +1082,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
-            # 🎁 [4번 기능 적용] 항목을 완료(True)로 변경할 때 20% 확률로 깜짝 팝업 응원 띄우기
+            # 🎁 [4번 기능] 항목을 완료(True)로 변경할 때 20% 확률로 깜짝 팝업 응원 띄우기
             if not was_done and random.random() < 0.2:
                 surprise_msg = random.choice(RANDOM_SURPRISE_MESSAGES)
                 await query.answer(text=surprise_msg, show_alert=True)
