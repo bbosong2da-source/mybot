@@ -1018,8 +1018,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
         return
 
+    # 📢 [통합 공지 과제 체크박스 클릭]
     if data.startswith("bctoggle_merged_"):
-        await query.answer()
         task_idx = int(data.split("_")[2])
 
         if key in daily_broadcast_state:
@@ -1027,9 +1027,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             curr_val = state["records"].get(task_idx, False)
             state["records"][task_idx] = not curr_val
 
+            # 🎁 [20% 확률 깜짝 응원 팝업]
+            if not curr_val and random.random() < 0.2:
+                surprise_msg = random.choice(RANDOM_SURPRISE_MESSAGES)
+                await query.answer(text=surprise_msg, show_alert=True)
+            else:
+                await query.answer()
+
             keyboard = []
+            all_done = True
             for idx, task in enumerate(state["tasks"]):
                 is_done = state["records"].get(idx, False)
+                if not is_done:
+                    all_done = False
                 icon = "🐦‍⬛️" if is_done else "🥚"
                 keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_merged_{idx}")])
 
@@ -1041,6 +1051,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 if "Message is not modified" not in str(e):
                     print(f"공지 버튼 수정 실패: {e}")
+
+            # 🎉 [전체 공지 과제 ALL CLEAR 축하 메시지]
+            if all_done and len(state["tasks"]) > 0 and not curr_val:
+                congrat_bc_msg = "🎉 **[전체 공지 과제 ALL CLEAR!]** 🎉\n\n모든 필수 공지 과제를 완수하셨습니다! 수고 많으셨습니다! ✨"
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        message_thread_id=thread_id if thread_id != 0 else None,
+                        text=congrat_bc_msg,
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"공지 축하 메시지 발송 실패: {e}")
+        else:
+            await query.answer()
         return
 
     if data.startswith("reset_"):
@@ -1395,7 +1420,6 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # 🛠️ 단축어 핸들러 매핑 (배열에 포함된 단축 명령어를 100% 수신)
     app.add_handler(CommandHandler(["start", "s", "START", "S"], start))
     app.add_handler(CommandHandler(["off", "OFF"], bot_off))
     app.add_handler(CommandHandler(["on", "ON"], bot_on))
