@@ -64,7 +64,6 @@ def get_bible_label(start_chapter_idx, chunk_size):
     else:
         return f"{start_book} {start_ch}장 - {end_book} {end_ch}장"
 
-# 🛠️ 1. 신약 '마'와 '막' 사이의 불필요한 줄바꿈 보완
 def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
@@ -88,7 +87,6 @@ def generate_bible_status_text(current_ch_idx):
 
         msg += f"{status_icon} `{short_name}` "
 
-        # 구약(0~38) 및 신약(39~65) 각각 독립적으로 5권씩 줄바꿈
         if idx < 39:
             if (idx + 1) % 5 == 0 and idx != 38:
                 msg += "\n"
@@ -412,7 +410,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         })
 
     if added_summary:
-        plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"📅 **주간 과제가 세팅되었습니다!**\n"
             f"오늘 요일과 일치하는 과제는 목록에 즉시 반영되었습니다.\n\n"
@@ -490,7 +488,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "bible_ch_idx": matched_ch_idx
     })
 
-    plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+    plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
         f"🔥 **성경 묵상 시작 지점이 설정되었습니다!**\n"
         f"• 하루 설정 분량: **{chunk_size}장씩**\n"
@@ -511,8 +509,8 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ 2. 완수한 섹션(카테고리)은 자동으로 화면에서 숨겨지는 build_plan_view
-def build_plan_view(key, show_all_buttons=False, target_indices=None):
+# 🛠️ 카테고리 내 모든 과제가 완료되었을 때만 해당 섹션이 숨겨지도록 구현된 build_plan_view
+def build_plan_view(key):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
 
@@ -566,24 +564,26 @@ def build_plan_view(key, show_all_buttons=False, target_indices=None):
         text = (
             f"📝 **오늘의 공부 점검**\n\n"
             f"📊 **달성 현황:**\n{stat_str}\n\n"
-            f"버튼을 누르면 완료 상태로 전환되며, 완수한 섹션은 자동으로 숨겨집니다.\n"
+            f"버튼을 누르면 완료 상태로 전환되며, 카테고리의 모든 일을 마치면 섹션이 자동으로 정돈됩니다.\n"
         )
 
-    # 기본적으로 미완료된 항목만 표시 (완료 시 해당 항목 및 섹션 자동 제외)
-    if target_indices is not None:
-        indices_to_show = set(target_indices)
-    elif show_all_buttons:
-        indices_to_show = set(range(len(plans)))
-    else:
-        indices_to_show = {i for i, p in enumerate(plans) if not p["done"]}
+    # 카테고리별 완료 여부 조사
+    category_uncompleted_count = {}
+    for _, item in plans_with_index:
+        cat = item.get("category", "")
+        if cat not in category_uncompleted_count:
+            category_uncompleted_count[cat] = 0
+        if not item["done"]:
+            category_uncompleted_count[cat] += 1
 
     keyboard = []
     last_category = None
 
     for real_idx, item in plans_with_index:
-        if real_idx in indices_to_show and not item["done"]:
-            category = item.get("category", "")
-
+        category = item.get("category", "")
+        
+        # 카테고리 내에 미완료된 항목이 최소 1개라도 남아있는 경우에만 버튼 노출!
+        if category_uncompleted_count.get(category, 0) > 0:
             if category and category != last_category:
                 keyboard.append(
                     [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
@@ -754,7 +754,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if added_count > 0:
         cheer = random.choice(CHEERING_MESSAGES)
-        plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        plan_text, reply_markup = build_plan_view(key)
 
         response_msg = (
             f"✅ **{added_count}개의 계획이 추가되었습니다!**\n"
@@ -797,7 +797,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/routine 영단어 30개 암기`", parse_mode="Markdown")
         return
 
-    plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+    plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
         f"🔄 **{added_count}개의 [매일] 루틴이 추가되었습니다!**\n\n"
         f"-------------------------\n"
@@ -828,7 +828,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
             modified_count += 1
 
     if modified_count > 0:
-        plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"✏️ **루틴 수정 완료!** `{old_name}` ➔ `{new_name}`\n\n-------------------------\n{plan_text}",
             reply_markup=reply_markup,
@@ -840,7 +840,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
-    text, reply_markup = build_plan_view(key, show_all_buttons=False)
+    text, reply_markup = build_plan_view(key)
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
@@ -952,7 +952,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if "정산 리포트" in original_text or "누적 통계" in original_text:
                 text, reply_markup = build_weekly_view(key)
             else:
-                text, reply_markup = build_plan_view(key, show_all_buttons=False)
+                text, reply_markup = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
                     text = f"{header}-------------------------\n{text}"
@@ -985,7 +985,7 @@ async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
         chat_id, thread_id = key
-        plan_text, reply_markup = build_plan_view(key, show_all_buttons=False)
+        plan_text, reply_markup = build_plan_view(key)
         
         msg = (
             "🌅 **[좋은 아침입니다! 오늘 하루도 힘차게 시작해 봐요!]**\n\n"
@@ -1020,7 +1020,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
                 reply_markup = None
             else:
-                plan_text, reply_markup = build_plan_view(key, show_all_buttons=False, target_indices=uncompleted_indices)
+                plan_text, reply_markup = build_plan_view(key)
                 msg = f"🔔 **[오늘의 미완료 점검 알림 - {now_str}]**\n\n{plan_text}"
 
             try:
