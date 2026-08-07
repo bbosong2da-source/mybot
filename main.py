@@ -6,7 +6,14 @@ import pytz
 import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import BotCommandScopeDefault, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -1396,13 +1403,37 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
     save_data()
 
-# 🛠️ 기존 등록된 기본/관리자 scope 명령어 삭제 및 초기화
+# 🛠️ 개인 대화방에는 단축어 메뉴 등록, 그룹/토픽 방에서는 자동완성 메뉴 제거
 async def post_init(application):
     try:
-        await application.bot.delete_my_commands(scope=BotCommandScopeDefault())
-        await application.bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=ADMIN_ID))
+        # 1. 개인 대화방(1:1 채팅)에만 노출될 단축어 메뉴 목록 설정
+        private_commands = [
+            BotCommand("s", "봇 시작 및 안내"),
+            BotCommand("l", "오늘 할 일 목록"),
+            BotCommand("r", "매일 루틴 추가"),
+            BotCommand("wt", "요일별 과제 설정"),
+            BotCommand("t", "알림 시간 설정"),
+            BotCommand("bp", "성경 하루 분량 설정"),
+            BotCommand("bs", "성경 시작 지점 설정"),
+            BotCommand("st", "성경 완독 현황판"),
+            BotCommand("w", "주간 리포트"),
+            BotCommand("e", "매일 루틴 수정"),
+            BotCommand("rs", "계획 초기화"),
+            BotCommand("bc", "[관리자] 통합 공지 과제 발송"),
+            BotCommand("rp", "[관리자] 사용자 답장"),
+            BotCommand("bcr", "[관리자] 공지 수행 리포트"),
+        ]
+        await application.bot.set_my_commands(
+            commands=private_commands, 
+            scope=BotCommandScopeAllPrivateChats()
+        )
+
+        # 2. 모든 그룹/슈퍼그룹/토픽 방의 자동완성 메뉴 완전 삭제
+        await application.bot.delete_my_commands(
+            scope=BotCommandScopeAllGroupChats()
+        )
     except Exception as e:
-        print(f"명령어 목록 초기화 중 참고: {e}")
+        print(f"메뉴 스코프 설정 중 오류 발생: {e}")
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
