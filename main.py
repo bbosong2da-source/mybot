@@ -510,7 +510,19 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ 성경 묵상이 [매일] 카테고리 헤더 아래 깔끔히 정돈되도록 정렬 로직 수정
+# 🛠️ 카테고리(섹션) 우선순위 가중치 산출 함수
+def get_category_priority(category_name):
+    if category_name == "[매일]":
+        return 1
+    elif "요일 과제]" in category_name or "요일 할일]" in category_name:
+        return 2
+    elif category_name == "[일반]":
+        return 99
+    else:
+        return 3
+
+
+# 🛠️ 우선순위 정렬 알고리즘이 포함된 build_plan_view
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
@@ -521,9 +533,15 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
-    # 카테고리 이름순 정렬 -> 동일 카테고리 내에서는 일반 항목 후 성경 묵상 배치
+    # 섹션 우선순위 -> 카테고리 이름순 -> 일반 항목 후 성경 묵상 순서로 정렬
     plans_with_index = list(enumerate(plans))
-    plans_with_index.sort(key=lambda x: (x[1].get("category", ""), x[1].get("is_bible", False)))
+    plans_with_index.sort(
+        key=lambda x: (
+            get_category_priority(x[1].get("category", "")),
+            x[1].get("category", ""),
+            x[1].get("is_bible", False)
+        )
+    )
 
     normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
     routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and p.get("is_bible") != True]
@@ -587,7 +605,6 @@ def build_plan_view(key, visible_indices=None):
                       (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
         if should_show:
-            # 카테고리가 달라졌을 때 헤더 출력 (매일 루틴과 성경 묵상이 [매일]로 통합됨)
             if category and category != last_category:
                 keyboard.append(
                     [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
