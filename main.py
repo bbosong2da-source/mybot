@@ -181,6 +181,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
+# 🛠️ 관리자 발송 제외, 제외 키워드 파싱, 공지 과제 발송 보완
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
     user_id = update.effective_user.id
@@ -188,10 +189,10 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 관리자만 사용할 수 있는 명령어입니다.")
         return
 
-    key = get_topic_key(update)
+    admin_key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
-    if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+    if admin_key not in topic_plans:
+        topic_plans[admin_key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
 
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/broadcast\s*", "", text_content).strip()
@@ -199,10 +200,12 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not raw_input:
         await update.message.reply_text(
             "📢 **[독립 공지 과제 발송 방법]**\n\n"
-            "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n\n"
+            "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n"
+            "(선택: 상단에 `제외: 광고, 공지` 입력 시 특정 토픽 제외 가능)\n\n"
             "**작성 예시:**\n"
             "```\n"
-            "/broadcast [전체 필수 공지 과제]\n"
+            "/broadcast 제외: 광고, 공지\n"
+            "[전체 필수 공지 과제]\n"
             "주간 질문 작성하기\n"
             "공지사항 숙지 및 체크하기\n"
             "```",
@@ -213,11 +216,21 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = raw_input.split("\n")
     title = "[전체 공지 과제]"
     tasks = []
+    exclude_keywords = ["광고", "공지", "자료", "자료방", "광고방", "공지방"]
 
     for line in lines:
         raw_line = line.strip()
         if not raw_line:
             continue
+        
+        # 제외 키워드 파싱 (예: 제외: 광고, 공지, 사과)
+        if raw_line.startswith("제외:"):
+            ex_str = raw_line.replace("제외:", "").strip()
+            custom_excludes = [k.strip() for k in ex_str.split(",") if k.strip()]
+            if custom_excludes:
+                exclude_keywords = custom_excludes
+            continue
+
         cat_match = re.search(r"^\[\s*(.*?)\s*\]$", raw_line)
         if cat_match:
             title = f"[{cat_match.group(1).strip()}]"
@@ -246,14 +259,17 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     skipped_count = 0
     msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
-    EXCLUDE_KEYWORDS = ["자료", "자료공유", "자료방", "광고", "광고방", "공지"]
-
     for t_key in list(topic_plans.keys()):
+        # 1. 명령어를 입력한 관리자 본인의 방/토픽은 체크박스 발송 제외
+        if t_key == admin_key:
+            continue
+
         chat_id, thread_id = t_key
         user_info = topic_plans.get(t_key, {})
         u_name = user_info.get("user_name", "")
 
-        if any(keyword in u_name for keyword in EXCLUDE_KEYWORDS):
+        # 2. 지정된 제외 키워드가 포함된 토픽 제외
+        if any(keyword in u_name for keyword in exclude_keywords):
             skipped_count += 1
             continue
 
@@ -273,7 +289,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
-        f"🚫 제외된 채팅방(자료방 등): **{skipped_count}개**\n"
+        f"🚫 제외된 채팅방/토픽 (제외 키워드: {', '.join(exclude_keywords)}): **{skipped_count}개**\n"
         f"📊 리포트 확인: `/broadcast_report`"
     )
 
@@ -510,7 +526,6 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ 카테고리(섹션) 우선순위 가중치 산출 함수
 def get_category_priority(category_name):
     if category_name == "[매일]":
         return 1
@@ -522,7 +537,6 @@ def get_category_priority(category_name):
         return 3
 
 
-# 🛠️ 우선순위 정렬 알고리즘이 포함된 build_plan_view
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
@@ -533,7 +547,6 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
-    # 섹션 우선순위 -> 카테고리 이름순 -> 일반 항목 후 성경 묵상 순서로 정렬
     plans_with_index = list(enumerate(plans))
     plans_with_index.sort(
         key=lambda x: (
@@ -871,6 +884,7 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
+# 🛠️ 버튼 클릭 및 전체 공지 과제 완수 축하 메시지 보완
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -893,6 +907,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
         return
 
+    # 전체 공지 과제 버튼 클릭 처리
     if data.startswith("bctoggle_"):
         parts = data.split("_")
         bc_id = int(parts[1])
@@ -921,6 +936,20 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 if "Message is not modified" not in str(e):
                     print(f"공지 버튼 수정 예외: {e}")
+
+            # 🛠️ 모든 전체 공지 과제 완수 시 축하 메시지 발송
+            all_done = all(user_records.get(i, False) for i in range(len(tasks)))
+            if all_done and len(tasks) > 0:
+                congrat_bc_msg = f"🎉 **축하합니다! {title}의 모든 과제를 완수하셨습니다!** 👏✨"
+                try:
+                    await context.bot.send_message(
+                        chat_id=chat_id,
+                        message_thread_id=thread_id if thread_id != 0 else None,
+                        text=congrat_bc_msg,
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    print(f"공지 완수 축하 메시지 발송 예외: {e}")
         return
 
     if data.startswith("reset_"):
