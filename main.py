@@ -15,12 +15,58 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from supabase import create_client, Client
 
 # ⚠️ 1. 본인의 텔레그램 숫자 ID를 입력하세요
 ADMIN_ID = 75036448
 
-# ⚠️ 2. 클라우드 서버 환경변수에서 안전하게 토큰을 가져옵니다.
+# ⚠️ 2. 클라우드 서버 환경변수에서 안전하게 값들을 가져옵니다.
 TOKEN = os.environ.get("BOT_TOKEN")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# 💾 Supabase 클라이언트 연결
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("⚡ Supabase 클라우드 데이터베이스에 연결되었습니다!")
+    except Exception as e:
+        print(f"❌ Supabase 연결 실패: {e}")
+else:
+    print("⚠️ SUPABASE_URL 또는 SUPABASE_KEY 환경변수가 설정되지 않았습니다.")
+
+topic_plans = {}
+
+# 💾 DB 저장 / 불러오기 함수
+def save_data():
+    if not supabase:
+        return
+    try:
+        for k, v in topic_plans.items():
+            key_str = f"{k[0]}_{k[1]}"
+            supabase.table("bot_data").upsert({"key": key_str, "data": v}).execute()
+    except Exception as e:
+        print(f"❌ 데이터 저장 중 오류 발생: {e}")
+
+def load_data():
+    global topic_plans
+    if not supabase:
+        return
+    try:
+        response = supabase.table("bot_data").select("*").execute()
+        rows = response.data
+        if rows:
+            topic_plans = {}
+            for row in rows:
+                key_str = row["key"]
+                data = row["data"]
+                chat_id, thread_id = map(int, key_str.split("_"))
+                topic_plans[(chat_id, thread_id)] = data
+            print("💾 Supabase에서 기존 데이터를 안전하게 복원했습니다!")
+    except Exception as e:
+        print(f"❌ 데이터 불러오기 중 오류 발생: {e}")
+
 
 # 성경 전체 권 및 장수 데이터 (구약 39권 + 신약 27권 = 총 1,189장)
 BIBLE_STRUCTURE = [
@@ -98,7 +144,6 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
-# 🛠️ 새 웰컴 메시지 반영
 WELCOME_MESSAGES = [
     "🐦‍⬛️✨ 반갑습니다! 주 7일의 말씀 봇 안내입니다.\n\n"
     "• **할 일 등록:** 채팅창에 계획 보내기\n"
@@ -127,7 +172,6 @@ CHEERING_MESSAGES = [
     "🌱 오늘의 노력이 결실을 맺을 거예요. 끝까지 달려봐요!",
 ]
 
-# 🎁 깜짝 응원 팝업 메시지 리스트 (20% 확률 이벤트)
 RANDOM_SURPRISE_MESSAGES = [
     "💌 깜짝 응원! 꾸준히 해내는 당신이 정말 멋져요!",
     "🍀 오늘 흘린 땀방울이 곧 결실을 맺을 거예요! 화이팅!",
@@ -137,7 +181,6 @@ RANDOM_SURPRISE_MESSAGES = [
 ]
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
-topic_plans = {}
 
 broadcast_data = {}
 current_broadcast_id = 0
@@ -155,7 +198,6 @@ WEEKLY_TASK_PROMPT_MSG = (
     "```"
 )
 
-
 def get_topic_key(update: Update):
     chat_id = update.effective_chat.id
     thread_id = (
@@ -165,12 +207,10 @@ def get_topic_key(update: Update):
     )
     return (chat_id, thread_id)
 
-
 def get_korean_date_str():
     now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
     weekday_str = WEEKDAY_KOR[now.weekday()]
     return now.strftime(f"%m월 %d일 ({weekday_str})")
-
 
 def get_korean_week_range_str():
     tz = pytz.timezone("Asia/Seoul")
@@ -183,17 +223,16 @@ def get_korean_week_range_str():
     sat_str = f"{sat.strftime('%m월 %d일')} (토)"
     return f"{sun_str} ~ {sat_str}"
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
 
     if key not in topic_plans:
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
+        save_data()
 
     welcome_text = random.choice(WELCOME_MESSAGES)
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
-
 
 async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -203,6 +242,7 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": True}
     else:
         topic_plans[key]["disabled"] = True
+    save_data()
 
     await update.message.reply_text(
         "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
@@ -210,7 +250,6 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "다시 켜시려면 `/on`을 입력해 주세요!",
         parse_mode="Markdown"
     )
-
 
 async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -220,13 +259,13 @@ async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
     else:
         topic_plans[key]["disabled"] = False
+    save_data()
 
     await update.message.reply_text(
         "🔔 **이 토픽에서 봇 기능이 다시 활성화되었습니다!**\n\n"
         "이제 작성하시는 일반 메시지가 오늘 할 일로 등록되며, 전체 공지 과제를 수신합니다.",
         parse_mode="Markdown"
     )
-
 
 async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -282,7 +321,6 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ **[대상 ID: {target_id}]**로 성공적으로 답변을 발송했습니다!")
     except Exception as e:
         await update.message.reply_text(f"❌ 답변 발송 실패: {e}\n(상대방이 봇을 차단했거나 ID가 올바르지 않은지 확인해 주세요.)")
-
 
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
@@ -396,7 +434,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 리포트 확인: `/broadcast_report`"
     )
 
-
 async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -435,7 +472,6 @@ async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(report_msg, parse_mode="Markdown")
 
-
 async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -460,6 +496,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if raw_args.lower() in ["off", "끄기", "해제"]:
         topic_plans[key]["notify_time"] = None
+        save_data()
         await update.message.reply_text("🔕 **일일 계획 점검 알림이 해제되었습니다.**", parse_mode="Markdown")
         return
 
@@ -470,12 +507,12 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     formatted_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}"
     topic_plans[key]["notify_time"] = formatted_time
+    save_data()
 
     await update.message.reply_text(
         f"🔔 **매일 `{formatted_time}`에 오늘의 공부 및 성경 점검 알림이 발송됩니다!**",
         parse_mode="Markdown"
     )
-
 
 async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -530,6 +567,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         })
 
     if added_summary:
+        save_data()
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"📅 **주간 과제가 세팅되었습니다!**\n"
@@ -542,7 +580,6 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text("❌ 요일과 할 일 형식을 맞춰서 입력해 주세요. (예: `월: 과제 제출`)")
-
 
 async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -558,9 +595,9 @@ async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": chunk_size, "weekly_tasks": {}, "notify_time": None, "disabled": False}
     else:
         topic_plans[key]["bible_chunk"] = chunk_size
+    save_data()
 
     await update.message.reply_text(f"⚙️ **성경 읽기 분량이 하루 `{chunk_size}장`으로 설정되었습니다!**", parse_mode="Markdown")
-
 
 async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -607,6 +644,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "is_bible": True,
         "bible_ch_idx": matched_ch_idx
     })
+    save_data()
 
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
@@ -619,7 +657,6 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-
 async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     data = topic_plans.get(key, {})
@@ -627,7 +664,6 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = generate_bible_status_text(current_ch_idx)
     await update.message.reply_text(msg, parse_mode="Markdown")
-
 
 def get_category_priority(category_name):
     if category_name == "[매일]":
@@ -638,7 +674,6 @@ def get_category_priority(category_name):
         return 99
     else:
         return 3
-
 
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
@@ -740,7 +775,6 @@ def build_plan_view(key, visible_indices=None):
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     return text, reply_markup
 
-
 def build_weekly_view(key):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
@@ -818,7 +852,6 @@ def build_weekly_view(key):
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     return msg, reply_markup
 
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -881,6 +914,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             added_count += 1
 
     if added_count > 0:
+        save_data()
         cheer = random.choice(CHEERING_MESSAGES)
         plan_text, reply_markup = build_plan_view(key)
 
@@ -891,7 +925,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{plan_text}"
         )
         await update.message.reply_text(response_msg, reply_markup=reply_markup, parse_mode="Markdown")
-
 
 async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -925,6 +958,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/r 영단어 30개 암기`", parse_mode="Markdown")
         return
 
+    save_data()
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
         f"🔄 **{added_count}개의 [매일] 루틴이 추가되었습니다!**\n\n"
@@ -934,7 +968,6 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-
 async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     data = topic_plans.get(key, {})
@@ -943,7 +976,6 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/(edit_routine|edit|e)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
-    # > 또는 -> 구분을 둘 다 허용하도록 변경
     delimiter = None
     if ">" in raw_input:
         delimiter = ">"
@@ -963,6 +995,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
             modified_count += 1
 
     if modified_count > 0:
+        save_data()
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"✏️ **루틴 수정 완료!** `{old_name}` > `{new_name}`\n\n-------------------------\n{plan_text}",
@@ -972,18 +1005,15 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ `{old_name}` 항목을 찾을 수 없습니다.", parse_mode="Markdown")
 
-
 async def list_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     text, reply_markup = build_plan_view(key)
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
-
 async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     weekly_text, reply_markup = build_weekly_view(key)
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
-
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1003,6 +1033,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible")]
+                save_data()
             await query.edit_message_text("🧹 **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
         elif data == "weekly_opt_rollover":
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
@@ -1058,15 +1089,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" in p.get("category", "")]
+                save_data()
             await query.edit_message_text("🧹 **일반 할 일만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_routines":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
+                save_data()
             await query.edit_message_text("🧹 **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_all":
             if key in topic_plans:
                 topic_plans[key]["plans"] = []
+                save_data()
             await query.edit_message_text("🧹 **모든 공부 계획과 루틴이 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_cancel":
             await query.edit_message_text("❌ 초기화가 취소되었습니다.")
@@ -1082,7 +1116,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
-            # 🎁 [4번 기능] 항목을 완료(True)로 변경할 때 20% 확률로 깜짝 팝업 응원 띄우기
             if not was_done and random.random() < 0.2:
                 surprise_msg = random.choice(RANDOM_SURPRISE_MESSAGES)
                 await query.answer(text=surprise_msg, show_alert=True)
@@ -1166,6 +1199,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["done"] = False
                     target_item["bible_ch_idx"] = next_ch_idx
 
+                save_data()
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1176,7 +1210,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         print(f"메시지 최종 수정 예외: {e}")
-
 
 async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1194,7 +1227,6 @@ async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ 취소", callback_data="reset_cancel")],
     ]
     await update.message.reply_text("🧹 **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
 
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1219,7 +1251,6 @@ async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             print(f"아침 알림 발송 실패 ({key}): {e}")
-
 
 async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
@@ -1251,7 +1282,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
-
 
 async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1292,7 +1322,6 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
             text=WEEKLY_TASK_PROMPT_MSG,
             parse_mode="Markdown",
         )
-
 
 async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
@@ -1342,7 +1371,7 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "is_bible": True,
                     "bible_ch_idx": next_ch_idx
                 })
-
+    save_data()
 
 async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1353,9 +1382,8 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         uncompleted_plans = [p for p in plans if not p["done"]]
         topic_plans[key]["plans"] = uncompleted_plans
         topic_plans[key]["weekly_tasks"] = {}
+    save_data()
 
-
-# 🛠️ 텔레그램 메뉴 팝업 설정 (단축어 중심 등록)
 async def post_init(application):
     user_commands = [
         BotCommand("s", "봇 시작 및 사용법 보기"),
@@ -1388,7 +1416,6 @@ async def post_init(application):
     except Exception as e:
         print(f"관리자 전용 메뉴 등록 실패 (ADMIN_ID 확인 필요): {e}")
 
-
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -1400,13 +1427,14 @@ def run_health_check_server():
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
-
 if __name__ == "__main__":
     threading.Thread(target=run_health_check_server, daemon=True).start()
 
+    # 💾 DB에서 기존 사용자 데이터 불러오기
+    load_data()
+
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # 축약형 명령어 우선 매핑 (기존 긴 명령어도 함께 지원)
     app.add_handler(CommandHandler(["start", "START", "Start", "s", "S"], start))
     app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
     app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
