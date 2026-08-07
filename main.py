@@ -107,6 +107,7 @@ WELCOME_MESSAGES = [
     "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
     "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
     "• **성경 66권 현황판:** `/bible_status` (완료: 🐥 / 읽는중: 🐣 / 미완료: 🥚)\n"
+    "• **토픽 온/오프:** `/off` (자동 등록 끄기) / `/on` (자동 등록 켜기)\n"
     "• **비공개 질문:** `질문: [내용]` 또는 `비공개질문: [내용]`\n"
     "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
     "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
@@ -175,10 +176,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name or "사용자"
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
 
     welcome_text = random.choice(WELCOME_MESSAGES)
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
+
+
+# 🛠️ 봇 비활성화 명령어 (/off)
+async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": True}
+    else:
+        topic_plans[key]["disabled"] = True
+
+    await update.message.reply_text(
+        "🔕 **이 토픽에서 봇의 자동 할 일 등록 기능이 비활성화되었습니다.**\n\n"
+        "자유롭게 메시지나 광고글을 나누실 수 있습니다.\n"
+        "다시 켜시려면 `/on`을 입력해 주세요!",
+        parse_mode="Markdown"
+    )
+
+
+# 🛠️ 봇 재활성화 명령어 (/on)
+async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    key = get_topic_key(update)
+    user_name = update.effective_user.first_name or "사용자"
+
+    if key not in topic_plans:
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
+    else:
+        topic_plans[key]["disabled"] = False
+
+    await update.message.reply_text(
+        "🔔 **이 토픽에서 봇의 자동 할 일 등록 기능이 다시 활성화되었습니다!**\n\n"
+        "이제 작성하시는 일반 메시지가 오늘 할 일로 등록됩니다.",
+        parse_mode="Markdown"
+    )
 
 
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,7 +227,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
     if admin_key not in topic_plans:
-        topic_plans[admin_key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[admin_key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
 
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/broadcast\s*", "", text_content, flags=re.IGNORECASE).strip()
@@ -335,7 +371,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_args = " ".join(context.args).strip() if context.args else ""
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
 
     if not raw_args:
         curr_time = topic_plans[key].get("notify_time")
@@ -381,7 +417,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_input = re.sub(r"^/weekly_task\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
 
     if not raw_input:
         await update.message.reply_text(WEEKLY_TASK_PROMPT_MSG, parse_mode="Markdown")
@@ -448,7 +484,7 @@ async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chunk_size = int(raw_args)
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": chunk_size, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": chunk_size, "weekly_tasks": {}, "notify_time": None, "disabled": False}
     else:
         topic_plans[key]["bible_chunk"] = chunk_size
 
@@ -481,7 +517,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": matched_ch_idx, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": matched_ch_idx, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
     else:
         topic_plans[key]["bible_ch_idx"] = matched_ch_idx
 
@@ -712,7 +748,7 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
-# 🛠️ 광고/자료방 메시지 자동 무시 스크리닝이 포함된 handle_message
+# 🛠️ 비활성화 상태 체크가 추가된 handle_message
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -724,9 +760,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text.startswith("/"):
         return
 
-    # 🛑 2. 광고방/자료방/공지방의 메시지는 할 일로 등록하지 않고 무시
-    EXCLUDE_KEYWORDS = ["광고", "광고방", "자료", "자료방", "공지", "공지방"]
-    if any(keyword in user_name for keyword in EXCLUDE_KEYWORDS):
+    # 🛑 2. 비활성화된 토픽(/off)에서는 할 일 자동 등록 무시
+    if key in topic_plans and topic_plans[key].get("disabled", False):
         return
 
     # 🔒 3. 비공개 질문 처리 (관리자에게만 1:1 전달)
@@ -746,7 +781,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
     else:
         topic_plans[key]["user_name"] = user_name
 
@@ -804,7 +839,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         routine_lines = [raw_args]
 
     if key not in topic_plans:
-        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
+        topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
 
     added_count = 0
     for line in routine_lines:
@@ -1078,6 +1113,8 @@ async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
+        if data.get("disabled", False):
+            continue
         chat_id, thread_id = key
         plan_text, reply_markup = build_plan_view(key)
         
@@ -1103,6 +1140,8 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
     
     for key, data in topic_plans.items():
+        if data.get("disabled", False):
+            continue
         user_notify_time = data.get("notify_time")
         if user_notify_time and user_notify_time == now_str:
             chat_id, thread_id = key
@@ -1131,6 +1170,8 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
+        if data.get("disabled", False):
+            continue
         chat_id, thread_id = key
         weekly_text, _ = build_weekly_view(key)
         plans = data.get("plans", [])
@@ -1174,6 +1215,8 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
     
     for key, data in topic_plans.items():
+        if data.get("disabled", False):
+            continue
         plans = data.get("plans", [])
         
         routine_tasks = list(dict.fromkeys([p["task"] for p in plans if "[매일]" in p.get("category", "") and p.get("is_bible") != True]))
@@ -1218,6 +1261,8 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
+        if data.get("disabled", False):
+            continue
         plans = data.get("plans", [])
         
         uncompleted_plans = [p for p in plans if not p["done"]]
@@ -1228,6 +1273,8 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
 async def post_init(application):
     user_commands = [
         BotCommand("start", "봇 시작 및 사용법 보기"),
+        BotCommand("off", "이 토픽에서 봇 비활성화 (자유 대화/광고)"),
+        BotCommand("on", "이 토픽에서 봇 재활성화"),
         BotCommand("routine", "매일 반복할 루틴 등록"),
         BotCommand("weekly_task", "요일별 반복 과제/업무 등록"),
         BotCommand("time", "일일 미완료 점검 알림 시간 설정 (예: /time 22:00)"),
@@ -1273,6 +1320,8 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler(["start", "START", "Start"], start))
+    app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
+    app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
     app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine"], add_routine))
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task"], add_weekly_task))
     app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
