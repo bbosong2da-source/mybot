@@ -181,7 +181,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 
-# 🛠️ 관리자 발송 제외, 제외 키워드 파싱, 공지 과제 발송 보완
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
     user_id = update.effective_user.id
@@ -195,7 +194,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[admin_key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/broadcast\s*", "", text_content).strip()
+    raw_input = re.sub(r"^/broadcast\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_input:
         await update.message.reply_text(
@@ -223,7 +222,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not raw_line:
             continue
         
-        # 제외 키워드 파싱 (예: 제외: 광고, 공지, 사과)
         if raw_line.startswith("제외:"):
             ex_str = raw_line.replace("제외:", "").strip()
             custom_excludes = [k.strip() for k in ex_str.split(",") if k.strip()]
@@ -260,7 +258,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
     for t_key in list(topic_plans.keys()):
-        # 1. 명령어를 입력한 관리자 본인의 방/토픽은 체크박스 발송 제외
         if t_key == admin_key:
             continue
 
@@ -268,7 +265,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info = topic_plans.get(t_key, {})
         u_name = user_info.get("user_name", "")
 
-        # 2. 지정된 제외 키워드가 포함된 토픽 제외
         if any(keyword in u_name for keyword in exclude_keywords):
             skipped_count += 1
             continue
@@ -382,7 +378,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/weekly_task\s*", "", text_content).strip()
+    raw_input = re.sub(r"^/weekly_task\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if key not in topic_plans:
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None}
@@ -716,12 +712,17 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
+# 🛠️ 대문자 명령어 방지 및 일반 메시지 처리 로직 보완
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
     chat_id, thread_id = key
     text = update.message.text.strip()
     today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+
+    # 🛑 슬래시(/)로 시작하는 대소문자 명령어 입력 시 일반 메시지 추가 방지
+    if text.startswith("/"):
+        return
 
     if text.startswith("전체질문:") or text.startswith("공개질문:"):
         question_text = re.sub(r"^(전체질문|공개질문)[:\s]*", "", text).strip()
@@ -806,7 +807,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.text:
         lines = update.message.text.split("\n")
-        first_line_clean = re.sub(r"^/routine\s*", "", lines[0]).strip()
+        first_line_clean = re.sub(r"^/routine\s*", "", lines[0], flags=re.IGNORECASE).strip()
         routine_lines = [first_line_clean] + lines[1:] if len(lines) > 1 else [first_line_clean]
     else:
         raw_args = " ".join(context.args).strip() if context.args else ""
@@ -847,7 +848,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plans = data.get("plans", [])
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/(edit_routine|edit)\s*", "", text_content).strip()
+    raw_input = re.sub(r"^/(edit_routine|edit)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if "->" not in raw_input:
         await update.message.reply_text("💡 형식: `/edit 기존루틴 -> 새루틴`", parse_mode="Markdown")
@@ -884,7 +885,6 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# 🛠️ 버튼 클릭 및 전체 공지 과제 완수 축하 메시지 보완
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -907,7 +907,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
         return
 
-    # 전체 공지 과제 버튼 클릭 처리
     if data.startswith("bctoggle_"):
         parts = data.split("_")
         bc_id = int(parts[1])
@@ -937,7 +936,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if "Message is not modified" not in str(e):
                     print(f"공지 버튼 수정 예외: {e}")
 
-            # 🛠️ 모든 전체 공지 과제 완수 시 축하 메시지 발송
             all_done = all(user_records.get(i, False) for i in range(len(tasks)))
             if all_done and len(tasks) > 0:
                 congrat_bc_msg = f"🎉 **축하합니다! {title}의 모든 과제를 완수하셨습니다!** 👏✨"
@@ -1284,19 +1282,20 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("routine", add_routine))
-    app.add_handler(CommandHandler("weekly_task", add_weekly_task))
-    app.add_handler(CommandHandler("broadcast", broadcast_task))
-    app.add_handler(CommandHandler("broadcast_report", broadcast_report))
-    app.add_handler(CommandHandler("time", set_notify_time))
-    app.add_handler(CommandHandler("bible_pages", bible_pages))
-    app.add_handler(CommandHandler("bible_start", bible_start))
-    app.add_handler(CommandHandler("bible_status", bible_status))
-    app.add_handler(CommandHandler(["edit", "edit_routine"], edit_routine))
-    app.add_handler(CommandHandler(["list", "ls"], list_plans))
-    app.add_handler(CommandHandler("weekly", weekly_plans))
-    app.add_handler(CommandHandler("reset", reset_plans))
+    # 🛠️ 대소문자 커맨드 입력을 지원하도록 CommandHandler 등록 보완
+    app.add_handler(CommandHandler(["start", "START", "Start"], start))
+    app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine"], add_routine))
+    app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task"], add_weekly_task))
+    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
+    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT"], broadcast_report))
+    app.add_handler(CommandHandler(["time", "TIME", "Time"], set_notify_time))
+    app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES"], bible_pages))
+    app.add_handler(CommandHandler(["bible_start", "BIBLE_START"], bible_start))
+    app.add_handler(CommandHandler(["bible_status", "BIBLE_STATUS"], bible_status))
+    app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE"], edit_routine))
+    app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List"], list_plans))
+    app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly"], weekly_plans))
+    app.add_handler(CommandHandler(["reset", "RESET", "Reset"], reset_plans))
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
