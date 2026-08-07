@@ -98,7 +98,6 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
-# 🛠️ 환영 메시지 타이틀 변경 반영
 WELCOME_MESSAGES = [
     "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
@@ -713,6 +712,7 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
+# 🛠️ 광고/자료방 메시지 자동 무시 스크리닝이 포함된 handle_message
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -720,9 +720,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
 
+    # 1. 슬래시(/) 명령어 입력 시 일반 메시지 처리 방지
     if text.startswith("/"):
         return
 
+    # 🛑 2. 광고방/자료방/공지방의 메시지는 할 일로 등록하지 않고 무시
+    EXCLUDE_KEYWORDS = ["광고", "광고방", "자료", "자료방", "공지", "공지방"]
+    if any(keyword in user_name for keyword in EXCLUDE_KEYWORDS):
+        return
+
+    # 🔒 3. 비공개 질문 처리 (관리자에게만 1:1 전달)
     if text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
         question_text = re.sub(r"^(비공개질문|질문)[:\s]*", "", text).strip()
         if not question_text:
