@@ -98,20 +98,20 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
-# 🛠️ 안내 메시지 (비공개질문 키워드 제거)
+# 🛠️ 안내 메시지 (간결화 및 약어만 남김)
 WELCOME_MESSAGES = [
     "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
-    "• **매일 루틴 등록:** `/routine [내용]` ➔ 매일 반복 루틴\n"
-    "• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 과제\n"
-    "• **알림 시간 설정:** `/time [시:분]` (예: `/time 22:00` / 끄기: `/time off`)\n"
-    "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
-    "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
-    "• **성경 66권 현황판:** `/bible_status`\n"
+    "• **매일 루틴:** `/r [내용]`\n"
+    "• **요일별 과제:** `/wt` [월화수목금: 내용]\n"
+    "• **알림 시간 설정:** `/time [시:분]` (끄기: `/time off`)\n"
+    "• **성경 하루 분량:** `/bp [장수]` (예: `/bp 5`)\n"
+    "• **성경 시작점:** `/bs [분량]` (예: `/bs 창 1장`)\n"
+    "• **성경 완독 현황판:** `/st`\n"
     "• **질문 보내기:** `질문: [내용]`\n"
-    "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
-    "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
-    "• `/reset` : 계획 초기화\n\n"
+    "• **오늘의 할 일:** `/list`\n"
+    "• **주간 리포트:** `/w`\n"
+    "• **계획 초기화:** `/rs`\n\n"
     "✨ 오늘 달성할 계획을 입력하거나 성경 읽기를 시작해 보세요!"
 ]
 
@@ -133,9 +133,9 @@ WEEKLY_TASK_PROMPT_MSG = (
     "📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
     "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
     "**💡 작성 예시:**\n"
-    "`/weekly_task` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n"
+    "`/wt` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n"
     "```\n"
-    "/weekly_task\n"
+    "/wt\n"
     "월: 과제 제출, 데이터 분석 강의\n"
     "수: 알고리즘 스터디\n"
     "금: 주간 보고서 작성\n"
@@ -192,7 +192,7 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = True
 
     await update.message.reply_text(
-        "🔕 **이 토픽에서 기능이 비활성화되었습니다.**\n\n"
+        "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
         "자유롭게 메시지나 광고글을 나누실 수 있으며, 전체 공지 과제(/broadcast) 수신 대상에서도 제외됩니다.\n"
         "다시 켜시려면 `/on`을 입력해 주세요!",
         parse_mode="Markdown"
@@ -209,13 +209,12 @@ async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = False
 
     await update.message.reply_text(
-        "🔔 **이 토픽에서 기능이 다시 활성화되었습니다!**\n\n"
+        "🔔 **이 토픽에서 봇 기능이 다시 활성화되었습니다!**\n\n"
         "이제 작성하시는 일반 메시지가 오늘 할 일로 등록되며, 전체 공지 과제를 수신합니다.",
         parse_mode="Markdown"
     )
 
 
-# 🛠️ [관리자 전용] 질문 답장 명령어 (/reply)
 async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
@@ -248,14 +247,12 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_chat_id = None
     target_thread_id = None
 
-    # 1. 토픽 ID인 경우 검색
     for (chat_id, th_id) in topic_plans.keys():
         if th_id == target_id and target_id != 0:
             target_chat_id = chat_id
             target_thread_id = th_id
             break
 
-    # 2. 토픽 ID로 찾지 못한 경우 (개인방 사용자 ID로 간주)
     if not target_chat_id:
         target_chat_id = target_id
         target_thread_id = None
@@ -475,7 +472,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/weekly_task\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_input = re.sub(r"^/(weekly_task|wt)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if key not in topic_plans:
         topic_plans[key] = {"user_name": user_name, "plans": [], "bible_ch_idx": 0, "bible_chunk": 4, "weekly_tasks": {}, "notify_time": None, "disabled": False}
@@ -540,7 +537,7 @@ async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_args = " ".join(context.args).strip() if context.args else ""
 
     if not raw_args.isdigit() or int(raw_args) <= 0:
-        await update.message.reply_text("💡 **하루에 읽을 장수(숫자)를 입력해 주세요.** (예: `/bible_pages 5`)", parse_mode="Markdown")
+        await update.message.reply_text("💡 **하루에 읽을 장수(숫자)를 입력해 주세요.** (예: `/bp 5`)", parse_mode="Markdown")
         return
 
     chunk_size = int(raw_args)
@@ -558,7 +555,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_args = " ".join(context.args).strip() if context.args else ""
 
     if not raw_args:
-        await update.message.reply_text("💡 예시: `/bible_start 창 1장` 또는 `/bible_start 마태복음 7장`", parse_mode="Markdown")
+        await update.message.reply_text("💡 예시: `/bs 창 1장`", parse_mode="Markdown")
         return
 
     matched_ch_idx = -1
@@ -636,7 +633,7 @@ def build_plan_view(key, visible_indices=None):
 
     if not plans:
         return (
-            "📋 등록된 할 일이 없습니다.\n채팅창에 오늘 할 일이나 `/routine`, `/bible_start`를 입력해 보세요!",
+            "📋 등록된 할 일이 없습니다.\n채팅창에 오늘 할 일이나 `/r`, `/bs`를 입력해 보세요!",
             None,
         )
 
@@ -809,7 +806,6 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
-# 🛠️ 질문 처리 로직 (사용자 ID 및 토픽 ID 포함)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -824,7 +820,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key in topic_plans and topic_plans[key].get("disabled", False):
         return
 
-    # 🔒 질문 처리 (관리자에게만 사용자 ID/토픽 ID 전달)
     if text.startswith("질문:") or text.startswith("질문 "):
         question_text = re.sub(r"^질문[:\s]*", "", text).strip()
         if not question_text:
@@ -892,7 +887,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.text:
         lines = update.message.text.split("\n")
-        first_line_clean = re.sub(r"^/routine\s*", "", lines[0], flags=re.IGNORECASE).strip()
+        first_line_clean = re.sub(r"^/(routine|r)\s*", "", lines[0], flags=re.IGNORECASE).strip()
         routine_lines = [first_line_clean] + lines[1:] if len(lines) > 1 else [first_line_clean]
     else:
         raw_args = " ".join(context.args).strip() if context.args else ""
@@ -914,7 +909,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
             added_count += 1
 
     if added_count == 0:
-        await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/routine 영단어 30개 암기`", parse_mode="Markdown")
+        await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/r 영단어 30개 암기`", parse_mode="Markdown")
         return
 
     plan_text, reply_markup = build_plan_view(key)
@@ -1330,21 +1325,22 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
 
 
+# 🛠️ 텔레그램 메뉴 팝업 설정 (약어 중심 등록)
 async def post_init(application):
     user_commands = [
         BotCommand("start", "봇 시작 및 사용법 보기"),
-        BotCommand("off", "이 토픽에서 봇 비활성화 (자유 대화/광고)"),
-        BotCommand("on", "이 토픽에서 봇 재활성화"),
-        BotCommand("routine", "매일 반복할 루틴 등록"),
-        BotCommand("weekly_task", "요일별 반복 과제/업무 등록"),
-        BotCommand("time", "일일 미완료 점검 알림 시간 설정 (예: /time 22:00)"),
-        BotCommand("bible_pages", "하루 읽을 장수 설정 (예: /bible_pages 5)"),
-        BotCommand("bible_start", "성경 묵상 시작점 지정 (예: /bible_start 창 1장)"),
-        BotCommand("bible_status", "성경 66권 완독 현황판 보기 (🐥/🐣/🥚)"),
-        BotCommand("edit", "등록된 매일 루틴 수정"),
+        BotCommand("r", "매일 반복 루틴 등록"),
+        BotCommand("wt", "주간 요일별 과제 등록"),
+        BotCommand("bs", "성경 묵상 시작점 지정"),
+        BotCommand("bp", "하루 읽을 성경 장수 설정"),
+        BotCommand("st", "성경 66권 완독 현황판 보기"),
+        BotCommand("time", "일일 미완료 점검 알림 시간 설정"),
         BotCommand("list", "오늘의 남은 공부/성경 체크박스 확인"),
-        BotCommand("weekly", "주간 공부/성경 달성률 리포트"),
-        BotCommand("reset", "계획 초기화"),
+        BotCommand("w", "주간 공부/성경 달성률 리포트"),
+        BotCommand("edit", "등록된 매일 루틴 수정"),
+        BotCommand("rs", "오늘 계획 초기화"),
+        BotCommand("off", "이 토픽에서 봇 비활성화"),
+        BotCommand("on", "이 토픽에서 봇 재활성화"),
     ]
     await application.bot.set_my_commands(user_commands)
 
@@ -1380,22 +1376,23 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
+    # 핸들러에 풀네임 및 축약형 명령어 동시 매핑
     app.add_handler(CommandHandler(["start", "START", "Start"], start))
     app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
     app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
     app.add_handler(CommandHandler(["reply", "REPLY", "Reply"], admin_reply))
-    app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine"], add_routine))
-    app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task"], add_weekly_task))
+    app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine", "r", "R"], add_routine))
+    app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task", "wt", "WT"], add_weekly_task))
     app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
     app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT"], broadcast_report))
     app.add_handler(CommandHandler(["time", "TIME", "Time"], set_notify_time))
-    app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES"], bible_pages))
-    app.add_handler(CommandHandler(["bible_start", "BIBLE_START"], bible_start))
-    app.add_handler(CommandHandler(["bible_status", "BIBLE_STATUS"], bible_status))
+    app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES", "bp", "BP"], bible_pages))
+    app.add_handler(CommandHandler(["bible_start", "BIBLE_START", "bs", "BS"], bible_start))
+    app.add_handler(CommandHandler(["bible_status", "BIBLE_STATUS", "st", "ST"], bible_status))
     app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE"], edit_routine))
     app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List"], list_plans))
-    app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly"], weekly_plans))
-    app.add_handler(CommandHandler(["reset", "RESET", "Reset"], reset_plans))
+    app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly", "w", "W"], weekly_plans))
+    app.add_handler(CommandHandler(["reset", "RESET", "Reset", "rs", "RS"], reset_plans))
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
