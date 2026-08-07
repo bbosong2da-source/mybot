@@ -98,8 +98,9 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
+# 🛠️ 환영 메시지 타이틀 변경 반영
 WELCOME_MESSAGES = [
-    "👋 **반갑습니다! 공부 및 성경 읽기 계획 봇 안내** 📝\n\n"
+    "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
     "• **매일 루틴 등록:** `/routine [내용]` ➔ 매일 반복 루틴\n"
     "• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 과제\n"
@@ -107,7 +108,7 @@ WELCOME_MESSAGES = [
     "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
     "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
     "• **성경 66권 현황판:** `/bible_status` (완료: 🐥 / 읽는중: 🐣 / 미완료: 🥚)\n"
-    "• **질문:** `질문: [내용]` (1:1 비공개) / `전체질문: [내용]` (공개)\n"
+    "• **비공개 질문:** `질문: [내용]` 또는 `비공개질문: [내용]`\n"
     "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
     "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
     "• `/reset` : 계획 초기화\n\n"
@@ -712,7 +713,6 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
-# 🛠️ 대문자 명령어 방지 및 일반 메시지 처리 로직 보완
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -720,27 +720,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
 
-    # 🛑 슬래시(/)로 시작하는 대소문자 명령어 입력 시 일반 메시지 추가 방지
     if text.startswith("/"):
         return
 
-    if text.startswith("전체질문:") or text.startswith("공개질문:"):
-        question_text = re.sub(r"^(전체질문|공개질문)[:\s]*", "", text).strip()
-        if not question_text:
-            await update.message.reply_text("💡 질문 내용을 작성해 주세요!", parse_mode="Markdown")
-            return
-
-        location_label = f"토픽 #{thread_id}" if thread_id != 0 else "개인방"
-        admin_msg = f"📢 **[공개 질문]** {user_name} ({location_label}): {question_text}"
-        try:
-            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
-        except Exception as e:
-            print(f"관리자 알림 실패: {e}")
-
-        await update.message.reply_text(f"📢 **[전체 질문 게시]**\n👤 {user_name}: {question_text}", parse_mode="Markdown")
-        return
-
-    elif text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
+    if text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
         question_text = re.sub(r"^(비공개질문|질문)[:\s]*", "", text).strip()
         if not question_text:
             await update.message.reply_text("💡 질문 내용을 작성해 주세요!", parse_mode="Markdown")
@@ -1282,7 +1265,6 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # 🛠️ 대소문자 커맨드 입력을 지원하도록 CommandHandler 등록 보완
     app.add_handler(CommandHandler(["start", "START", "Start"], start))
     app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine"], add_routine))
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task"], add_weekly_task))
