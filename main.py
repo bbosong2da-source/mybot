@@ -102,7 +102,7 @@ WELCOME_MESSAGES = [
     "👋 **반갑습니다! 공부 및 성경 읽기 계획 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
     "• **매일 루틴 등록:** `/routine [내용]` ➔ 매일 반복 루틴\n"
-    "• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 반복 과제\n"
+    "• **주간 요일별 과제 등록:** `/weekly_task` ➔ 특정 요일 과제\n"
     "• **알림 시간 설정:** `/time [시:분]` (예: `/time 22:00` / 끄기: `/time off`)\n"
     "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
     "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
@@ -246,7 +246,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     skipped_count = 0
     msg = f"📢 **{title}**\n\n아래 안내 과제를 확인하신 후 완료된 항목을 클릭해 주세요!\n"
 
-    EXCLUDE_KEYWORDS = ["자료", "자료공유", "자료방"]
+    EXCLUDE_KEYWORDS = ["자료", "자료공유", "자료방", "광고", "광고방", "공지"]
 
     for t_key in list(topic_plans.keys()):
         chat_id, thread_id = t_key
@@ -510,7 +510,6 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# 🛠️ visible_indices 세트를 받아 현재 보이고 있는 인덱스만 렌더링하는 build_plan_view
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
@@ -582,8 +581,6 @@ def build_plan_view(key, visible_indices=None):
     for real_idx, item in plans_with_index:
         category = item.get("category", "")
         
-        # visible_indices가 지정된 경우 해당 인덱스 세트 내의 항목만 출력,
-        # 지정되지 않은 기본 상태에서는 미완료 항목이 남아있는 섹션만 노출!
         should_show = (visible_indices is not None and real_idx in visible_indices) or \
                       (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
@@ -854,7 +851,7 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# 🛠️ 현재 화면에 보이고 있는 키보드 인덱스만 파싱하여 지연 업데이트 수행
+# 🛠️ 버튼 클릭 이벤트 처리
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -866,6 +863,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     thread_id = query.message.message_thread_id if query.message.message_thread_id else 0
     key = (chat_id, thread_id)
     data = query.data
+
+    # 🛠️ 토요일 주간 리포트 이월 / 미완료 삭제 버튼 처리
+    if data.startswith("weekly_opt_"):
+        if data == "weekly_opt_clear":
+            if key in topic_plans:
+                plans = topic_plans[key].get("plans", [])
+                # 완료되었거나 성경 항목만 남기고 미완료 일반/루틴 항목 삭제
+                topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible")]
+            await query.edit_message_text("🧹 **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
+        elif data == "weekly_opt_rollover":
+            await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
+        return
 
     if data.startswith("bctoggle_"):
         parts = data.split("_")
@@ -926,7 +935,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
-            if target_item.get("is_bible") and not was_done:
+            is_bible_task = target_item.get("is_bible", False)
+
+            if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = topic_data.get("bible_chunk", 4)
                 
@@ -962,7 +973,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
-                # 현재 메시지 버튼에 보이고 있는 toggle_ 인덱스들 추출
                 current_visible_indices = set()
                 if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
                     for row in query.message.reply_markup.inline_keyboard:
@@ -977,7 +987,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not current_visible_indices:
                     current_visible_indices = None
 
-                # 1단계: 현재 화면에 존재하던 버튼 범위만 그대로 유지한 채 까마귀(🐦‍⬛️)로 상태 업데이트
                 text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -989,8 +998,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
 
-                # 2단계: 1초 지연 후 완수한 카테고리 및 체크박스 정돈
                 await asyncio.sleep(1)
+
+                if is_bible_task and target_item["done"]:
+                    curr_ch_idx = target_item.get("bible_ch_idx", 0)
+                    chunk_size = topic_data.get("bible_chunk", 4)
+                    
+                    next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
+                    topic_data["bible_ch_idx"] = next_ch_idx
+                    next_label = get_bible_label(next_ch_idx, chunk_size)
+
+                    target_item["task"] = f"성경 묵상: {next_label}"
+                    target_item["done"] = False
+                    target_item["bible_ch_idx"] = next_ch_idx
 
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
@@ -1075,16 +1095,30 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
 
 
+# 🛠️ 토요일 주간 리포트 및 미완료 항목 이월/삭제 선택 버튼 발송
 async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
         chat_id, thread_id = key
-        weekly_text, reply_markup = build_weekly_view(key)
+        weekly_text, _ = build_weekly_view(key)
+        plans = data.get("plans", [])
         
+        uncompleted_count = sum(1 for p in plans if not p["done"] and not p.get("is_bible"))
+
         msg = (
             "🔔 **[토요일 주간 정산 및 점검 리포트]**\n\n"
             + weekly_text
-            + "\n\n💡 *미완료된 항목은 일요일 자정에 자동으로 다음 것으로 이월됩니다!*"
         )
+
+        keyboard = []
+        if uncompleted_count > 0:
+            msg += "\n\n💡 **이번 주 미완료 항목 처리 방법을 선택해 주세요:**"
+            keyboard = [
+                [InlineKeyboardButton("🧹 이번 주 미완료 항목 삭제 (초기화)", callback_data="weekly_opt_clear")],
+                [InlineKeyboardButton("➡️ 미완료 항목 다음 주로 이월", callback_data="weekly_opt_rollover")],
+            ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
         await context.bot.send_message(
             chat_id=chat_id,
             message_thread_id=thread_id if thread_id != 0 else None,
