@@ -98,6 +98,7 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
+# 🛠️ 안내 메시지 (비공개질문 키워드 제거)
 WELCOME_MESSAGES = [
     "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
@@ -107,7 +108,7 @@ WELCOME_MESSAGES = [
     "• **하루 읽을 장수 설정:** `/bible_pages [장수]` (예: `/bible_pages 5`)\n"
     "• **성경 읽기 시작점 설정:** `/bible_start [분량]` (예: `/bible_start 창 1장`)\n"
     "• **성경 66권 현황판:** `/bible_status`\n"
-    "• **비공개 질문:** `질문: [내용]` 또는 `비공개질문: [내용]`\n"
+    "• **질문 보내기:** `질문: [내용]`\n"
     "• `/list` : 오늘의 남은 공부 및 성경 체크박스\n"
     "• `/weekly` : 주간 공부/루틴 달성률 + 성경 리포트\n"
     "• `/reset` : 계획 초기화\n\n"
@@ -191,7 +192,7 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = True
 
     await update.message.reply_text(
-        "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
+        "🔕 **이 토픽에서 기능이 비활성화되었습니다.**\n\n"
         "자유롭게 메시지나 광고글을 나누실 수 있으며, 전체 공지 과제(/broadcast) 수신 대상에서도 제외됩니다.\n"
         "다시 켜시려면 `/on`을 입력해 주세요!",
         parse_mode="Markdown"
@@ -208,13 +209,71 @@ async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["disabled"] = False
 
     await update.message.reply_text(
-        "🔔 **이 토픽에서 봇 기능이 다시 활성화되었습니다!**\n\n"
+        "🔔 **이 토픽에서 기능이 다시 활성화되었습니다!**\n\n"
         "이제 작성하시는 일반 메시지가 오늘 할 일로 등록되며, 전체 공지 과제를 수신합니다.",
         parse_mode="Markdown"
     )
 
 
-# 🛠️ 비활성화(/off) 토픽 발송 제외 로직이 보완된 broadcast_task
+# 🛠️ [관리자 전용] 질문 답장 명령어 (/reply)
+async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ 관리자만 사용할 수 있는 명령어입니다.")
+        return
+
+    text_content = update.message.text.strip()
+    raw_args = re.sub(r"^/reply\s*", "", text_content, flags=re.IGNORECASE).strip()
+
+    if not raw_args or " " not in raw_args:
+        await update.message.reply_text(
+            "💬 **[관리자 답장 전송 방법]**\n\n"
+            "**/reply [토픽ID 또는 사용자ID] [답변 내용]**\n\n"
+            "**작성 예시:**\n"
+            "• 토픽 방 답장: `/reply 12345 안녕하세요.`\n"
+            "• 1:1 개인방 답장: `/reply 987654321 안녕하세요.`",
+            parse_mode="Markdown"
+        )
+        return
+
+    target_id_str, reply_text = raw_args.split(" ", 1)
+    
+    if not target_id_str.lstrip("-").isdigit():
+        await update.message.reply_text("❌ ID는 숫자로 입력해 주세요.")
+        return
+
+    target_id = int(target_id_str)
+    reply_text = reply_text.strip()
+
+    target_chat_id = None
+    target_thread_id = None
+
+    # 1. 토픽 ID인 경우 검색
+    for (chat_id, th_id) in topic_plans.keys():
+        if th_id == target_id and target_id != 0:
+            target_chat_id = chat_id
+            target_thread_id = th_id
+            break
+
+    # 2. 토픽 ID로 찾지 못한 경우 (개인방 사용자 ID로 간주)
+    if not target_chat_id:
+        target_chat_id = target_id
+        target_thread_id = None
+
+    msg_to_user = f"💬 **[관리자 답변]**\n\n{reply_text}"
+
+    try:
+        await context.bot.send_message(
+            chat_id=target_chat_id,
+            message_thread_id=target_thread_id,
+            text=msg_to_user,
+            parse_mode="Markdown"
+        )
+        await update.message.reply_text(f"✅ **[대상 ID: {target_id}]**로 성공적으로 답변을 발송했습니다!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ 답변 발송 실패: {e}\n(상대방이 봇을 차단했거나 ID가 올바르지 않은지 확인해 주세요.)")
+
+
 async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_broadcast_id
     user_id = update.effective_user.id
@@ -299,7 +358,6 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info = topic_plans.get(t_key, {})
         u_name = user_info.get("user_name", "")
 
-        # 🛑 /off 설정으로 비활성화된 토픽 제외
         if user_info.get("disabled", False):
             skipped_count += 1
             continue
@@ -751,9 +809,11 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 
+# 🛠️ 질문 처리 로직 (사용자 ID 및 토픽 ID 포함)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
+    sender_id = update.effective_user.id
     chat_id, thread_id = key
     text = update.message.text.strip()
     today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
@@ -764,17 +824,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key in topic_plans and topic_plans[key].get("disabled", False):
         return
 
-    if text.startswith("질문:") or text.startswith("질문 ") or text.startswith("비공개질문:"):
-        question_text = re.sub(r"^(비공개질문|질문)[:\s]*", "", text).strip()
+    # 🔒 질문 처리 (관리자에게만 사용자 ID/토픽 ID 전달)
+    if text.startswith("질문:") or text.startswith("질문 "):
+        question_text = re.sub(r"^질문[:\s]*", "", text).strip()
         if not question_text:
             await update.message.reply_text("💡 질문 내용을 작성해 주세요!", parse_mode="Markdown")
             return
 
-        location_label = f"토픽 #{thread_id}" if thread_id != 0 else "개인방"
-        admin_msg = f"🔒 **[비공개 질문]** {user_name} ({location_label}): {question_text}"
+        location_label = f"토픽 #{thread_id}" if thread_id != 0 else f"개인방 (ID: `{sender_id}`)"
+        admin_msg = f"🔒 **[질문]** {user_name} ({location_label}): {question_text}"
         try:
             await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
-            await update.message.reply_text("🔒 질문이 관리자에게 비공개로 전달되었습니다.")
+            await update.message.reply_text("🔒 질문이 관리자에게 전달되었습니다.")
         except Exception as e:
             print(f"질문 전달 실패: {e}")
         return
@@ -1288,6 +1349,7 @@ async def post_init(application):
     await application.bot.set_my_commands(user_commands)
 
     admin_commands = user_commands + [
+        BotCommand("reply", "[관리자] 토픽 또는 사용자 ID로 답변 전송"),
         BotCommand("broadcast", "[관리자] 전체 독립 공지 과제 발송"),
         BotCommand("broadcast_report", "[관리자] 공지 과제 수행 결과 리포트 조회"),
     ]
@@ -1321,6 +1383,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler(["start", "START", "Start"], start))
     app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
     app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
+    app.add_handler(CommandHandler(["reply", "REPLY", "Reply"], admin_reply))
     app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine"], add_routine))
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task"], add_weekly_task))
     app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
