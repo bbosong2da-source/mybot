@@ -1218,7 +1218,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     now_str = now_dt.strftime("%H:%M")
     yesterday_date = (now_dt - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # 1) 일반 공부 점검 알림
     for key, data in topic_plans.items():
         if data.get("disabled", False):
             continue
@@ -1247,7 +1246,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
 
-    # 2) ⏰ [밤 22:00] 어제 발송된 브로드캐스트 공지 과제 미완료 경고 알림 발송
     if now_str == "22:00":
         for key, state in daily_broadcast_state.items():
             chat_id, thread_id = key
@@ -1376,7 +1374,6 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
     save_data()
 
-# 🛠️ 그룹/토픽 방에서 / 입력 시 자동완성 팝업 차단
 async def post_init(application):
     pass
 
@@ -1394,28 +1391,28 @@ def run_health_check_server():
 if __name__ == "__main__":
     threading.Thread(target=run_health_check_server, daemon=True).start()
 
-    # 💾 DB에서 기존 사용자 데이터 불러오기
     load_data()
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # 단축어 및 긴 명령어 매핑
-    app.add_handler(CommandHandler(["start", "START", "Start", "s", "S"], start))
-    app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
-    app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
-    app.add_handler(CommandHandler(["reply", "REPLY", "Reply", "rp", "RP"], admin_reply))
-    app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine", "r", "R"], add_routine))
-    app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task", "wt", "WT"], add_weekly_task))
-    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast", "bc", "BC"], broadcast_task))
-    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT", "bcr", "BCR", "bcrp"], broadcast_report))
-    app.add_handler(CommandHandler(["time", "TIME", "Time", "t", "T"], set_notify_time))
-    app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES", "bp", "BP"], bible_pages))
-    app.add_handler(CommandHandler(["bible_start", "BIBLE_START", "bs", "BS"], bible_start))
-    app.add_handler(CommandHandler(["bible_status", "BIBLE_STATUS", "st", "ST"], bible_status))
-    app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE", "e", "E"], edit_routine))
-    app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List", "l", "L"], list_plans))
-    app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly", "w", "W"], weekly_plans))
-    app.add_handler(CommandHandler(["reset", "RESET", "Reset", "rs", "RS"], reset_plans))
+    # 🛠️ 단축어 핸들러 매핑 (배열에 포함된 단축 명령어를 100% 수신)
+    app.add_handler(CommandHandler(["start", "s", "START", "S"], start))
+    app.add_handler(CommandHandler(["off", "OFF"], bot_off))
+    app.add_handler(CommandHandler(["on", "ON"], bot_on))
+    app.add_handler(CommandHandler(["rp", "reply", "RP", "REPLY"], admin_reply))
+    app.add_handler(CommandHandler(["r", "routine", "R", "ROUTINE"], add_routine))
+    app.add_handler(CommandHandler(["wt", "weekly_task", "WT"], add_weekly_task))
+    app.add_handler(CommandHandler(["bc", "broadcast", "BC"], broadcast_task))
+    app.add_handler(CommandHandler(["bcr", "broadcast_report", "bcrp", "BCR"], broadcast_report))
+    app.add_handler(CommandHandler(["t", "time", "T"], set_notify_time))
+    app.add_handler(CommandHandler(["bp", "bible_pages", "BP"], bible_pages))
+    app.add_handler(CommandHandler(["bs", "bible_start", "BS"], bible_start))
+    app.add_handler(CommandHandler(["st", "bible_status", "ST"], bible_status))
+    app.add_handler(CommandHandler(["e", "edit", "edit_routine", "E"], edit_routine))
+    app.add_handler(CommandHandler(["l", "list", "ls", "L"], list_plans))
+    app.add_handler(CommandHandler(["w", "weekly", "W"], weekly_plans))
+    app.add_handler(CommandHandler(["rs", "reset", "RS"], reset_plans))
+    
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
