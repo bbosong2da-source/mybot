@@ -510,6 +510,7 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
+# 🛠️ 성경 묵상이 [매일] 카테고리 헤더 아래 깔끔히 정돈되도록 정렬 로직 수정
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
@@ -520,6 +521,7 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
+    # 카테고리 이름순 정렬 -> 동일 카테고리 내에서는 일반 항목 후 성경 묵상 배치
     plans_with_index = list(enumerate(plans))
     plans_with_index.sort(key=lambda x: (x[1].get("category", ""), x[1].get("is_bible", False)))
 
@@ -585,6 +587,7 @@ def build_plan_view(key, visible_indices=None):
                       (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
         if should_show:
+            # 카테고리가 달라졌을 때 헤더 출력 (매일 루틴과 성경 묵상이 [매일]로 통합됨)
             if category and category != last_category:
                 keyboard.append(
                     [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
@@ -851,7 +854,6 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(weekly_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# 🛠️ 버튼 클릭 이벤트 처리
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -864,12 +866,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (chat_id, thread_id)
     data = query.data
 
-    # 🛠️ 토요일 주간 리포트 이월 / 미완료 삭제 버튼 처리
     if data.startswith("weekly_opt_"):
         if data == "weekly_opt_clear":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
-                # 완료되었거나 성경 항목만 남기고 미완료 일반/루틴 항목 삭제
                 topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible")]
             await query.edit_message_text("🧹 **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
         elif data == "weekly_opt_rollover":
@@ -1095,7 +1095,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
 
 
-# 🛠️ 토요일 주간 리포트 및 미완료 항목 이월/삭제 선택 버튼 발송
 async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
         chat_id, thread_id = key
