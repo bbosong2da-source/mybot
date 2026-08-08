@@ -49,7 +49,7 @@ topic_plans = {}
 daily_broadcast_state = {}
 
 
-# 💾 DB 저장 / 불러오기 함수
+# 💾 DB 저장 / 불러오기 함수 (키 형변환 및 예외처리 안전 보강)
 def save_data():
     if not supabase:
         return
@@ -82,15 +82,18 @@ def load_data():
             topic_plans = {}
             daily_broadcast_state = {}
             for row in rows:
-                key_str = row["key"]
+                key_str = str(row["key"])
                 data = row["data"]
                 if key_str.startswith("bc_"):
                     parts = key_str.split("_")
-                    chat_id, thread_id = int(parts[1]), int(parts[2])
-                    daily_broadcast_state[(chat_id, thread_id)] = data
+                    if len(parts) >= 3:
+                        chat_id, thread_id = int(parts[1]), int(parts[2])
+                        daily_broadcast_state[(chat_id, thread_id)] = data
                 else:
-                    chat_id, thread_id = map(int, key_str.split("_"))
-                    topic_plans[(chat_id, thread_id)] = data
+                    parts = key_str.split("_")
+                    if len(parts) >= 2:
+                        chat_id, thread_id = int(parts[0]), int(parts[1])
+                        topic_plans[(chat_id, thread_id)] = data
             print("💾 Supabase에서 기존 데이터를 안전하게 복원했습니다!")
     except Exception as e:
         print(f"❌ 데이터 불러오기 중 오류 발생: {e}")
@@ -288,7 +291,7 @@ def get_topic_key(update: Update):
         and update.effective_message.message_thread_id
         else 0
     )
-    return (chat_id, thread_id)
+    return (int(chat_id), int(thread_id))
 
 
 def get_korean_week_range_str():
@@ -1284,7 +1287,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if query.message.message_thread_id
         else 0
     )
-    key = (chat_id, thread_id)
+    key = (int(chat_id), int(thread_id))
     data = query.data
 
     if data.startswith("weekly_opt_"):
@@ -1658,7 +1661,7 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
         # 1. 일반 단발성 할 일 중 완료된 것 삭제 정돈
         new_plans = [p for p in plans if not (p["done"] and "[일반]" in p.get("category", ""))]
 
-        # 2. 루틴 항목들은 완료 상태만 Reset (중복 생성 금지)
+        # 2. 루틴 항목들은 완료 상태만 Reset (중복 생성 방지)
         for p in new_plans:
             if "[매일]" in p.get("category", ""):
                 p["done"] = False
@@ -1781,7 +1784,7 @@ if __name__ == "__main__":
     sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=KST)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
-    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(5,))  # 5 = 토요일 (0이 월요일)
+    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(5,))  # 5 = 토요일
     job_queue.run_daily(daily_routine_reset_job, time=midnight_time)
     job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(6,))  # 6 = 일요일
 
