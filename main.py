@@ -6,6 +6,7 @@ import pytz
 import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from supabase import create_client, Client
 from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -19,8 +20,19 @@ from telegram.ext import (
 # ⚠️ 1. 본인의 텔레그램 숫자 ID를 입력하세요
 ADMIN_ID = 75036448
 
-# ⚠️ 2. 클라우드 서버 환경변수에서 안전하게 토큰을 가져옵니다.
+# ⚠️ 2. 클라우드 서버 환경변수에서 안전하게 토큰 및 Supabase 정보를 가져옵니다.
 TOKEN = os.environ.get("BOT_TOKEN")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+# Supabase 클라이언트 초기화
+supabase_client: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("✅ Supabase 클라이언트 연결 성공")
+    except Exception as e:
+        print(f"❌ Supabase 연결 실패: {e}")
 
 # 성경 전체 권, 장수 및 장별 총 절수 데이터 (구약 39권 + 신약 27권 = 총 1,189장 / 31,102절)
 BIBLE_STRUCTURE = [
@@ -102,6 +114,40 @@ for short_name, full_name, total_ch, verse_counts in BIBLE_STRUCTURE:
         for v_num in range(1, total_v + 1):
             ALL_BIBLE_VERSES.append((short_name, ch_num, v_num))
 
+# ---------------------------------------------------------
+# 💾 Supabase 연동 HELPER 함수 (DB 읽기 및 쓰기)
+# ---------------------------------------------------------
+topic_plans = {}
+
+def save_data_to_supabase(key, data):
+    """특정 (chat_id, thread_id) 키의 데이터를 Supabase DB에 저장/업데이트"""
+    if not supabase_client:
+        return
+    key_str = f"{key[0]}_{key[1]}"
+    try:
+        supabase_client.table("bot_data").upsert({
+            "key": key_str,
+            "data": data
+        }).execute()
+    except Exception as e:
+        print(f"❌ Supabase 저장 실패 ({key_str}): {e}")
+
+def load_data_from_supabase():
+    """봇 시작 시 Supabase DB에서 전체 데이터를 로드하여 메모리에 반영"""
+    global topic_plans
+    if not supabase_client:
+        return
+    try:
+        response = supabase_client.table("bot_data").select("*").execute()
+        for row in response.data:
+            key_parts = row["key"].split("_")
+            chat_id = int(key_parts[0])
+            thread_id = int(key_parts[1])
+            topic_plans[(chat_id, thread_id)] = row["data"]
+        print(f"✅ Supabase에서 {len(response.data)}개의 데이터를 성공적으로 로드했습니다.")
+    except Exception as e:
+        print(f"❌ Supabase 로드 실패: {e}")
+
 def get_full_book_name(short_name):
     for item in BIBLE_STRUCTURE:
         if item[0] == short_name:
@@ -110,7 +156,6 @@ def get_full_book_name(short_name):
 
 def get_bible_label(start_chapter_idx, chunk_size):
     end_chapter_idx = min(start_chapter_idx + chunk_size - 1, len(ALL_BIBLE_CHAPTERS) - 1)
-    
     start_book, start_ch = ALL_BIBLE_CHAPTERS[start_chapter_idx]
     end_book, end_ch = ALL_BIBLE_CHAPTERS[end_chapter_idx]
     
@@ -124,7 +169,6 @@ def get_bible_label(start_chapter_idx, chunk_size):
 
 def get_transcription_label(start_verse_idx, chunk_size):
     end_verse_idx = min(start_verse_idx + chunk_size - 1, len(ALL_BIBLE_VERSES) - 1)
-    
     start_book, start_ch, start_v = ALL_BIBLE_VERSES[start_verse_idx]
     end_book, end_ch, end_v = ALL_BIBLE_VERSES[end_verse_idx]
     
@@ -140,8 +184,8 @@ def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
     msg += "완료: 🐥 | 읽는중: 🐣 | 미완료: 🥚\n\n"
-
     msg += "📜 **[구약 39권]**\n"
+
     for idx, (short_name, full_name, total_ch, _) in enumerate(BIBLE_STRUCTURE):
         book_start_idx = current_global_idx
         book_end_idx = current_global_idx + total_ch - 1
@@ -173,8 +217,8 @@ def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
     msg = "✍️ **[성경 66권 필사 현황판]**\n"
     msg += "하기 전: 🧊 | 하는중: ☕️ | 한 후: 🍪\n\n"
-
     msg += "📜 **[구약 39권]**\n"
+
     for idx, (short_name, full_name, _, verse_counts) in enumerate(BIBLE_STRUCTURE):
         book_total_v = sum(verse_counts)
         book_start_v_idx = current_global_v_idx
@@ -232,8 +276,6 @@ CHEERING_MESSAGES = [
 ]
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
-topic_plans = {}
-
 broadcast_data = {}
 current_broadcast_id = 0
 
@@ -294,6 +336,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
+        save_data_to_supabase(key, topic_plans[key])
 
     welcome_text = random.choice(WELCOME_MESSAGES)
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
@@ -305,6 +348,7 @@ async def bot_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
     topic_plans[key]["disabled"] = True
+    save_data_to_supabase(key, topic_plans[key])
 
     await update.message.reply_text(
         "🔕 **이 토픽에서 봇 기능이 비활성화되었습니다.**\n\n"
@@ -320,6 +364,7 @@ async def bot_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
     topic_plans[key]["disabled"] = False
+    save_data_to_supabase(key, topic_plans[key])
 
     await update.message.reply_text(
         "🔔 **이 토픽에서 봇 기능이 다시 활성화되었습니다!**\n\n"
@@ -393,6 +438,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name or "사용자"
     if admin_key not in topic_plans:
         topic_plans[admin_key] = default_topic_data(user_name)
+        save_data_to_supabase(admin_key, topic_plans[admin_key])
 
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/(broadcast|bc)\s*", "", text_content, flags=re.IGNORECASE).strip()
@@ -556,6 +602,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if raw_args.lower() in ["off", "끄기", "해제"]:
         topic_plans[key]["notify_time"] = None
+        save_data_to_supabase(key, topic_plans[key])
         await update.message.reply_text("🔕 **일일 계획 점검 알림이 해제되었습니다.**", parse_mode="Markdown")
         return
 
@@ -566,6 +613,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     formatted_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}"
     topic_plans[key]["notify_time"] = formatted_time
+    save_data_to_supabase(key, topic_plans[key])
 
     await update.message.reply_text(
         f"🔔 **매일 `{formatted_time}`에 오늘의 공부 및 성경 점검 알림이 발송됩니다!**",
@@ -625,6 +673,7 @@ async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         })
 
     if added_summary:
+        save_data_to_supabase(key, topic_plans[key])
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"📅 **주간 과제가 세팅되었습니다!**\n"
@@ -651,6 +700,7 @@ async def bible_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
     topic_plans[key]["bible_chunk"] = chunk_size
+    save_data_to_supabase(key, topic_plans[key])
 
     await update.message.reply_text(f"⚙️ **성경 읽기 분량이 하루 `{chunk_size}장`으로 설정되었습니다!**", parse_mode="Markdown")
 
@@ -698,6 +748,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "is_bible": True,
         "bible_ch_idx": matched_ch_idx
     })
+    save_data_to_supabase(key, topic_plans[key])
 
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
@@ -731,6 +782,7 @@ async def transcription_pages(update: Update, context: ContextTypes.DEFAULT_TYPE
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
     topic_plans[key]["transcription_chunk"] = chunk_size
+    save_data_to_supabase(key, topic_plans[key])
 
     await update.message.reply_text(f"⚙️ **성경 필사 분량이 하루 `{chunk_size}절`로 설정되었습니다!**", parse_mode="Markdown")
 
@@ -780,6 +832,7 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         "is_transcription": True,
         "transcription_v_idx": matched_v_idx
     })
+    save_data_to_supabase(key, topic_plans[key])
 
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
@@ -829,6 +882,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
     if deleted_item:
+        save_data_to_supabase(key, topic_plans[key])
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"🗑️ **`{deleted_item['task']}` 항목이 삭제되었습니다.** (통계 분모에서 제외)\n\n"
@@ -1111,6 +1165,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             added_count += 1
 
     if added_count > 0:
+        save_data_to_supabase(key, topic_plans[key])
         cheer = random.choice(CHEERING_MESSAGES)
         plan_text, reply_markup = build_plan_view(key)
 
@@ -1154,6 +1209,7 @@ async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("💡 매일 반복할 루틴을 입력해 주세요!\n예시: `/r 영단어 30개 암기`", parse_mode="Markdown")
         return
 
+    save_data_to_supabase(key, topic_plans[key])
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
         f"🔄 **{added_count}개의 [매일] 루틴이 추가되었습니다!**\n\n"
@@ -1184,6 +1240,7 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
             modified_count += 1
 
     if modified_count > 0:
+        save_data_to_supabase(key, topic_plans[key])
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
             f"✏️ **루틴 수정 완료!** `{old_name}` ➔ `{new_name}`\n\n-------------------------\n{plan_text}",
@@ -1221,6 +1278,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible") or p.get("is_transcription")]
+                save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text("🧹 **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
         elif data == "weekly_opt_rollover":
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
@@ -1276,15 +1334,18 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" in p.get("category", "")]
+                save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text("🧹 **일반 할 일만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_routines":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
+                save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text("🧹 **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_all":
             if key in topic_plans:
                 topic_plans[key]["plans"] = []
+                save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text("🧹 **모든 공부 계획과 루틴이 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_cancel":
             await query.edit_message_text("❌ 초기화가 취소되었습니다.")
@@ -1299,6 +1360,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_item = plans[idx]
             was_done = target_item["done"]
             target_item["done"] = not was_done
+            save_data_to_supabase(key, topic_plans[key])
 
             # 🎯 10% 확률 응원 토스트 팝업 띄우기
             if target_item["done"] and random.random() < 0.10:
@@ -1421,6 +1483,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["task"] = f"성경 묵상: {next_label}"
                     target_item["done"] = False
                     target_item["bible_ch_idx"] = next_ch_idx
+                    save_data_to_supabase(key, topic_plans[key])
 
                 if is_trans_task and target_item["done"]:
                     curr_v_idx = target_item.get("transcription_v_idx", 0)
@@ -1433,6 +1496,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["task"] = f"성경 필사: {next_label}"
                     target_item["done"] = False
                     target_item["transcription_v_idx"] = next_v_idx
+                    save_data_to_supabase(key, topic_plans[key])
 
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
@@ -1671,6 +1735,9 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "is_transcription": True,
                     "transcription_v_idx": next_v_idx
                 })
+        
+        # 변경 사항 Supabase 저장
+        save_data_to_supabase(key, topic_plans[key])
 
 async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1681,8 +1748,12 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         uncompleted_plans = [p for p in plans if not p["done"]]
         topic_plans[key]["plans"] = uncompleted_plans
         topic_plans[key]["weekly_tasks"] = {}
+        save_data_to_supabase(key, topic_plans[key])
 
 async def post_init(application):
+    # 📥 봇 시작 시 Supabase에서 기존 데이터 전체 복원
+    load_data_from_supabase()
+
     user_commands = [
         BotCommand("s", "봇 시작 및 안내문 보기 (/start)"),
         BotCommand("l", "오늘의 할 일 체크박스 확인 (/list)"),
