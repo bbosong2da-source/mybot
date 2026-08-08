@@ -170,7 +170,6 @@ def generate_bible_status_text(current_ch_idx):
     return msg
 
 def generate_transcription_status_text(current_v_idx):
-    # 성경 필사 전용 현황판 (요청 이모지: 미완료 🧊 / 진행중 ☕️ / 완료 🍪)
     current_global_v_idx = 0
     msg = "✍️ **[성경 66권 필사 현황판]**\n"
     msg += "하기 전: 🧊 | 하는중: ☕️ | 한 후: 🍪\n\n"
@@ -207,6 +206,7 @@ def generate_transcription_status_text(current_v_idx):
 WELCOME_MESSAGES = [
     "👋 **반갑습니다! 주 7일의 말씀 봇 안내** 📝\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
+    "• **오늘의 할 일:** `/l` (또는 `/list`)\n"
     "• **매일 루틴:** `/r [내용]`\n"
     "• **요일별 과제:** `/wt`\n"
     "• **알림 시간 설정:** `/time [시:분]` (끄기: `/time off`)\n"
@@ -218,7 +218,6 @@ WELCOME_MESSAGES = [
     "• **성경 필사 현황판:** `/tst`\n"
     "• **할 일 삭제:** `/d [번호 또는 이름]`\n"
     "• **질문 보내기:** `질문: [내용]`\n"
-    "• **오늘의 할 일:** `/list`\n"
     "• **주간 리포트:** `/w`\n"
     "• **계획 초기화:** `/rs`\n\n"
     "✨ 오늘 달성할 계획을 입력하거나 성경 읽기 및 필사를 시작해 보세요!"
@@ -335,15 +334,15 @@ async def admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text_content = update.message.text.strip()
-    raw_args = re.sub(r"^/reply\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_args = re.sub(r"^/(reply|re)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_args or " " not in raw_args:
         await update.message.reply_text(
             "💬 **[관리자 답장 전송 방법]**\n\n"
-            "**/reply [토픽ID 또는 사용자ID] [답변 내용]**\n\n"
+            "**/re [토픽ID 또는 사용자ID] [답변 내용]** (또는 `/reply`)\n\n"
             "**작성 예시:**\n"
-            "• 토픽 방 답장: `/reply 12345 안녕하세요.`\n"
-            "• 1:1 개인방 답장: `/reply 987654321 안녕하세요.`",
+            "• 토픽 방 답장: `/re 12345 안녕하세요.`\n"
+            "• 1:1 개인방 답장: `/re 987654321 안녕하세요.`",
             parse_mode="Markdown"
         )
         return
@@ -396,16 +395,16 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[admin_key] = default_topic_data(user_name)
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/broadcast\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_input = re.sub(r"^/(broadcast|bc)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_input:
         await update.message.reply_text(
             "📢 **[독립 공지 과제 발송 방법]**\n\n"
-            "**/broadcast [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요.\n"
+            "**/bc [제목]** 입력 후 다음 줄에 과제 항목을 입력해 주세요. (또는 `/broadcast`)\n"
             "(선택: 상단에 `제외: 광고, 공지` 입력 시 특정 키워드 토픽 제외 가능 / `/off` 설정 토픽은 자동 제외)\n\n"
             "**작성 예시:**\n"
             "```\n"
-            "/broadcast 제외: 광고, 공지\n"
+            "/bc 제외: 광고, 공지\n"
             "[전체 필수 공지 과제]\n"
             "주간 질문 작성하기\n"
             "공지사항 숙지 및 체크하기\n"
@@ -492,7 +491,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ 총 **{success_count}개**의 대상 채팅방/토픽에 공지를 발송했습니다!\n"
         f"🚫 제외된 채팅방/토픽 (/off 설정 및 제외 키워드): **{skipped_count}개**\n"
-        f"📊 리포트 확인: `/broadcast_report`"
+        f"📊 리포트 확인: `/bcr` (또는 `/broadcast_report`)"
     )
 
 async def broadcast_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -719,7 +718,6 @@ async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = generate_bible_status_text(current_ch_idx)
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-# 🛠️ 성경 필사 전용 기능 (/tp, /ts, /tst)
 async def transcription_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
@@ -802,7 +800,6 @@ async def transcription_status(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = generate_transcription_status_text(current_v_idx)
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-# 🛠️ 할 일 단건 삭제 기능 (/del, /d)
 async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     data = topic_plans.get(key, {})
@@ -812,7 +809,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_input = re.sub(r"^/(delete|del|d)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
     if not raw_input:
-        await update.message.reply_text("💡 삭제할 할 일 번호 또는 이름을 입력해 주세요! (예: `/d 1` 또는 `/d 영단어`)\n`/list`에서 번호를 확인할 수 있습니다.", parse_mode="Markdown")
+        await update.message.reply_text("💡 삭제할 할 일 번호 또는 이름을 입력해 주세요! (예: `/d 1` 또는 `/d 영단어`)\n`/l`에서 번호를 확인할 수 있습니다.", parse_mode="Markdown")
         return
 
     if not plans:
@@ -821,13 +818,11 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     deleted_item = None
     
-    # 숫자 번호로 삭제
     if raw_input.isdigit():
         idx = int(raw_input) - 1
         if 0 <= idx < len(plans):
             deleted_item = plans.pop(idx)
     else:
-        # 텍스트 이름으로 삭제
         for i, p in enumerate(plans):
             if raw_input.lower() in p["task"].lower():
                 deleted_item = plans.pop(i)
@@ -1210,9 +1205,9 @@ async def weekly_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-
+    
     if query.data == "noop":
+        await query.answer()
         return
 
     chat_id = query.message.chat.id
@@ -1221,6 +1216,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data.startswith("weekly_opt_"):
+        await query.answer()
         if data == "weekly_opt_clear":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
@@ -1231,6 +1227,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("bctoggle_"):
+        await query.answer()
         parts = data.split("_")
         bc_id = int(parts[1])
         t_idx = int(parts[2])
@@ -1274,6 +1271,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("reset_"):
+        await query.answer()
         if data == "reset_tasks":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
@@ -1302,10 +1300,26 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
+            # 🎯 10% 확률 응원 토스트 팝업 띄우기
+            if target_item["done"] and random.random() < 0.10:
+                cheer_pop = random.choice([
+                    "🥳 한 걸음 더 성장하셨네요! 수고하셨어요!",
+                    "🧊 영생은 습관 만들기에 달려있다.",
+                    "☁️ 사람이 아무것도 모른다고 해도,해내려는 마음으로 노력하면 하늘이 도우신다.",
+                    "🍉 천국 성도가 되려면 나태하면 안되고 부지런해야 한다.",
+                    "🌿 성경은 우리의 희망이고, 우리의 생명이고, 우리의 스승이다.",
+                    "🎓 자신이 말씀을 좀 안다고 해서 안일하고 교만하면 안 된다.",
+                    "✨ 완벽해요! 이대로 계속 달려봐요!",
+                    "🔥 멋져요! 집중력이 대단하시네요!",
+                    "👏 깔끔하게 하나 해결! 최고예요!",
+                ])
+                await query.answer(cheer_pop, show_alert=False)
+            else:
+                await query.answer()
+
             is_bible_task = target_item.get("is_bible", False)
             is_trans_task = target_item.get("is_transcription", False)
 
-            # 성경 읽기 완독 축하
             if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = topic_data.get("bible_chunk", 4)
@@ -1333,7 +1347,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown"
                     )
 
-            # 성경 필사 완필 축하
             if is_trans_task and not was_done:
                 curr_v_idx = target_item.get("transcription_v_idx", 0)
                 chunk_size = topic_data.get("transcription_chunk", 10)
@@ -1473,7 +1486,6 @@ async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"아침 알림 발송 실패 ({key}): {e}")
 
-# 🛠️ 수정된 맞춤 시각 공부 점검 알림 (미완료 항목만 체크박스로 전송 + 요청 문구 및 통계 반영)
 async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
     
@@ -1503,7 +1515,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             else:
                 b_str = "미설정 또는 진행 중 🔥"
 
-            # 미완료된 항목만 필터링하여 체크박스 생성
             uncompleted_with_index = [(i, p) for i, p in enumerate(plans) if not p["done"]]
             
             msg = (
@@ -1673,30 +1684,30 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application):
     user_commands = [
-        BotCommand("start", "봇 시작 및 사용법 보기"),
-        BotCommand("r", "매일 반복 루틴 등록"),
-        BotCommand("wt", "주간 요일별 과제 등록"),
-        BotCommand("bs", "성경 묵상 시작점 지정"),
-        BotCommand("bp", "하루 읽을 성경 장수 설정"),
-        BotCommand("st", "성경 66권 완독 현황판 보기"),
-        BotCommand("ts", "성경 필사 시작점 지정"),
-        BotCommand("tp", "하루 필사할 성경 절수 설정"),
-        BotCommand("tst", "성경 66권 필사 현황판 보기"),
+        BotCommand("s", "봇 시작 및 안내문 보기 (/start)"),
+        BotCommand("l", "오늘의 할 일 체크박스 확인 (/list)"),
+        BotCommand("r", "매일 반복 루틴 등록 (/routine)"),
+        BotCommand("wt", "주간 요일별 과제 등록 (/weekly_task)"),
+        BotCommand("bs", "성경 묵상 시작점 지정 (/bible_start)"),
+        BotCommand("bp", "하루 읽을 성경 장수 설정 (/bible_pages)"),
+        BotCommand("st", "성경 66권 완독 현황판 보기 (/bible_status)"),
+        BotCommand("ts", "성경 필사 시작점 지정 (/tr_start)"),
+        BotCommand("tp", "하루 필사할 성경 절수 설정 (/tr_pages)"),
+        BotCommand("tst", "성경 66권 필사 현황판 보기 (/tr_status)"),
         BotCommand("d", "할 일 삭제 (/del)"),
-        BotCommand("time", "일일 미완료 점검 알림 시간 설정"),
-        BotCommand("list", "오늘의 남은 공부/성경 체크박스 확인"),
-        BotCommand("w", "주간 공부/성경 달성률 리포트"),
+        BotCommand("time", "일일 점검 알림 시간 설정"),
+        BotCommand("w", "주간 공부/성경 달성률 리포트 (/weekly)"),
         BotCommand("edit", "등록된 매일 루틴 수정"),
-        BotCommand("rs", "오늘 계획 초기화"),
+        BotCommand("rs", "오늘 계획 초기화 (/reset)"),
         BotCommand("off", "이 토픽에서 봇 비활성화"),
         BotCommand("on", "이 토픽에서 봇 재활성화"),
     ]
     await application.bot.set_my_commands(user_commands)
 
     admin_commands = user_commands + [
-        BotCommand("reply", "[관리자] 토픽 또는 사용자 ID로 답변 전송"),
-        BotCommand("broadcast", "[관리자] 전체 독립 공지 과제 발송"),
-        BotCommand("broadcast_report", "[관리자] 공지 과제 수행 결과 리포트 조회"),
+        BotCommand("re", "[관리자] 답변 전송 (/reply)"),
+        BotCommand("bc", "[관리자] 공지 과제 발송 (/broadcast)"),
+        BotCommand("bcr", "[관리자] 공지 결과 리포트 (/broadcast_report)"),
     ]
     
     try:
@@ -1723,14 +1734,14 @@ if __name__ == "__main__":
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    app.add_handler(CommandHandler(["start", "START", "Start"], start))
+    app.add_handler(CommandHandler(["start", "START", "Start", "s", "S"], start))
     app.add_handler(CommandHandler(["off", "OFF", "Off"], bot_off))
     app.add_handler(CommandHandler(["on", "ON", "On"], bot_on))
-    app.add_handler(CommandHandler(["reply", "REPLY", "Reply"], admin_reply))
+    app.add_handler(CommandHandler(["reply", "REPLY", "Reply", "re", "RE"], admin_reply))
     app.add_handler(CommandHandler(["routine", "ROUTINE", "Routine", "r", "R"], add_routine))
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task", "wt", "WT"], add_weekly_task))
-    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast"], broadcast_task))
-    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT"], broadcast_report))
+    app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast", "bc", "BC"], broadcast_task))
+    app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT", "bcr", "BCR"], broadcast_report))
     app.add_handler(CommandHandler(["time", "TIME", "Time"], set_notify_time))
     app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES", "bp", "BP"], bible_pages))
     app.add_handler(CommandHandler(["bible_start", "BIBLE_START", "bs", "BS"], bible_start))
@@ -1740,7 +1751,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler(["tr_status", "TR_STATUS", "tst", "TST"], transcription_status))
     app.add_handler(CommandHandler(["delete", "del", "d", "DELETE", "DEL", "D"], delete_plan))
     app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE"], edit_routine))
-    app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List"], list_plans))
+    app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List", "l", "L"], list_plans))
     app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly", "w", "W"], weekly_plans))
     app.add_handler(CommandHandler(["reset", "RESET", "Reset", "rs", "RS"], reset_plans))
     app.add_handler(CallbackQueryHandler(button_click))
