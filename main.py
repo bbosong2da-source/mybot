@@ -133,18 +133,30 @@ def save_data_to_supabase(key, data):
         print(f"❌ Supabase 저장 실패 ({key_str}): {e}")
 
 def load_data_from_supabase():
-    """봇 시작 시 Supabase DB에서 전체 데이터를 로드하여 메모리에 반영"""
+    """봇 시작 시 Supabase DB에서 전체 데이터를 안전하게 로드"""
     global topic_plans
     if not supabase_client:
         return
     try:
         response = supabase_client.table("bot_data").select("*").execute()
+        loaded_count = 0
         for row in response.data:
-            key_parts = row["key"].split("_")
-            chat_id = int(key_parts[0])
-            thread_id = int(key_parts[1])
-            topic_plans[(chat_id, thread_id)] = row["data"]
-        print(f"✅ Supabase에서 {len(response.data)}개의 데이터를 성공적으로 로드했습니다.")
+            key_str = row.get("key", "")
+            if not key_str or "_" not in key_str:
+                continue
+                
+            key_parts = key_str.split("_")
+            
+            # 💡 chat_id와 thread_id가 모두 숫자인 경우에만 (chat_id, thread_id) 튜플 키로 복원
+            if len(key_parts) == 2 and key_parts[0].lstrip("-").isdigit() and key_parts[1].isdigit():
+                chat_id = int(key_parts[0])
+                thread_id = int(key_parts[1])
+                topic_plans[(chat_id, thread_id)] = row["data"]
+                loaded_count += 1
+            else:
+                print(f"ℹ️ 비표준 키 건너뜀 또는 별도 처리: {key_str}")
+
+        print(f"✅ Supabase에서 {loaded_count}개의 사용자 데이터를 성공적으로 로드했습니다.")
     except Exception as e:
         print(f"❌ Supabase 로드 실패: {e}")
 
@@ -1689,7 +1701,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     else:
                         status_icon = "🥚"
 
-                    # ⬇️ 각 항목별 토글 버튼과 🗑️ 삭제 버튼 배치
                     keyboard.append([
                         InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
                         InlineKeyboardButton("🗑️ 삭제", callback_data=f"delete_item_{real_idx}")
