@@ -136,7 +136,7 @@ BIBLE_STRUCTURE = [
     ("하", "하박국", 3),
     ("습", "스바냐", 3),
     ("학", "학개", 2),
-    ("슥", "스카리야", 14),
+    ("슥", "스가랴", 14),
     ("말", "말라기", 4),
     ("마", "마태복음", 28),
     ("막", "마가복음", 16),
@@ -265,7 +265,7 @@ RANDOM_SURPRISE_MESSAGES = [
     "🧊 영생은 습관 만들기에 달려있다.",
     "🎓 천국 성도가 되려면 나태하면 안되고 부지런해야 한다.",
     "⚡️ 하나님의 말씀을 모른다는 자체는 하나님의 사람이 아니기 때문에 그런 것이다.",
-    "🍉 행복. 행하면 복이 옴."
+    "🍉 행복. 행하면 복이 옴.",
 ]
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
@@ -1018,15 +1018,28 @@ def build_weekly_view(key):
 
     current_ch_idx = data.get("bible_ch_idx", 0)
     chunk_size = data.get("bible_chunk", 4)
-    total_chapters = len(ALL_BIBLE_CHAPTERS)
-    overall_rate = (current_ch_idx / total_chapters) * 100
+
+    curr_book_short, _ = ALL_BIBLE_CHAPTERS[min(current_ch_idx, len(ALL_BIBLE_CHAPTERS) - 1)]
+
+    completed_books = 0
+    for idx, (b_short, _, _) in enumerate(BIBLE_STRUCTURE):
+        if b_short == curr_book_short:
+            completed_books = idx
+            break
+    else:
+        if current_ch_idx >= len(ALL_BIBLE_CHAPTERS):
+            completed_books = 66
+
+    total_books = len(BIBLE_STRUCTURE)
+    overall_rate = (completed_books / total_books) * 100
+
     current_label = (
         get_bible_label(current_ch_idx, chunk_size)
-        if current_ch_idx < total_chapters
+        if current_ch_idx < len(ALL_BIBLE_CHAPTERS)
         else "완독 완료!"
     )
 
-    msg += f"• **성경 전체 통산 달성률:** `{overall_rate:.2f}%` ({current_ch_idx}/{total_chapters} 장)\n"
+    msg += f"• **성경 전체 통산 달성률:** `{overall_rate:.1f}%` ({completed_books}/{total_books}권 완독)\n"
     msg += (
         f"• **현재 진행 위치 및 설정:** `{current_label}` (하루 {chunk_size}장씩)\n\n"
     )
@@ -1318,7 +1331,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             curr_val = state["records"].get(task_idx, False)
             state["records"][task_idx] = not curr_val
 
-            # 🛠️ 10% 확률로 깜짝 응원 메시지 발송
             if not curr_val and random.random() < 0.1:
                 await query.answer(
                     text=random.choice(RANDOM_SURPRISE_MESSAGES), show_alert=True
@@ -1415,7 +1427,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
-            # 🛠️ 10% 확률로 깜짝 응원 메시지 발송
             if not was_done and random.random() < 0.1:
                 await query.answer(
                     text=random.choice(RANDOM_SURPRISE_MESSAGES), show_alert=True
@@ -1425,7 +1436,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             is_bible_task = target_item.get("is_bible", False)
 
-            # 성경 읽기 완료 처리 시 다음 장 자동 진행
             if is_bible_task and target_item["done"]:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = topic_data.get("bible_chunk", 4)
@@ -1573,7 +1583,6 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"맞춤 알림 발송 실패 ({key}): {e}")
 
-    # 22:00 공지 미완료 경고 알림
     if now_str == "22:00":
         for key, state in daily_broadcast_state.items():
             chat_id, thread_id = key
@@ -1661,18 +1670,15 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
 
         plans = data.get("plans", [])
 
-        # 1. 일반 단발성 할 일 중 완료된 것 삭제 정돈
         new_plans = [
             p for p in plans if not (p["done"] and "[일반]" in p.get("category", ""))
         ]
 
-        # 2. 루틴 항목들은 완료 상태만 Reset (중복 생성 방지)
         for p in new_plans:
             if "[매일]" in p.get("category", ""):
                 p["done"] = False
                 p["date"] = today_str
 
-        # 3. 요일별 과제 자동 등록 (중복 체크)
         weekly_tasks_dict = data.get("weekly_tasks", {})
         if today_weekday_kor in weekly_tasks_dict:
             existing_today_tasks = [
