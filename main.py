@@ -49,19 +49,17 @@ topic_plans = {}
 daily_broadcast_state = {}
 
 
-# 💾 DB 저장 / 불러오기 함수 (키 형변환 및 예외처리 안전 보강)
+# 💾 DB 저장 / 불러오기 함수
 def save_data():
     if not supabase:
         return
     try:
-        # 1. 일반 계획 데이터 저장
         for k, v in topic_plans.items():
             key_str = f"{k[0]}_{k[1]}"
             supabase.table("bot_data").upsert(
                 {"key": key_str, "data": v}
             ).execute()
 
-        # 2. 브로드캐스트 상태 저장
         for k, v in daily_broadcast_state.items():
             key_str = f"bc_{k[0]}_{k[1]}"
             supabase.table("bot_data").upsert(
@@ -264,7 +262,10 @@ RANDOM_SURPRISE_MESSAGES = [
     "🍀 오늘 흘린 땀방울이 곧 결실을 맺을 거예요! 화이팅!",
     "🌟 집중력이 대단하시네요! 잠시 기지개 한번 켜고 가세요~",
     "👏 작은 실행 하나가 모여 큰 성장을 만듭니다. 응원해요!",
-    "☕ 열심히 달려온 자신에게 따뜻한 차 한 잔 선물해 보는 건 어떨까요?",
+    "🧊 영생은 습관 만들기에 달려있다.",
+    "🎓 천국 성도가 되려면 나태하면 안되고 부지런해야 한다.",
+    "⚡️ 하나님의 말씀을 모른다는 자체는 하나님의 사람이 아니기 때문에 그런 것이다.",
+    "🍉 행복. 행하면 복이 옴."
 ]
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
@@ -1317,7 +1318,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             curr_val = state["records"].get(task_idx, False)
             state["records"][task_idx] = not curr_val
 
-            if not curr_val and random.random() < 0.2:
+            # 🛠️ 10% 확률로 깜짝 응원 메시지 발송
+            if not curr_val and random.random() < 0.1:
                 await query.answer(
                     text=random.choice(RANDOM_SURPRISE_MESSAGES), show_alert=True
                 )
@@ -1413,7 +1415,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             was_done = target_item["done"]
             target_item["done"] = not was_done
 
-            if not was_done and random.random() < 0.2:
+            # 🛠️ 10% 확률로 깜짝 응원 메시지 발송
+            if not was_done and random.random() < 0.1:
                 await query.answer(
                     text=random.choice(RANDOM_SURPRISE_MESSAGES), show_alert=True
                 )
@@ -1659,7 +1662,9 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
         plans = data.get("plans", [])
 
         # 1. 일반 단발성 할 일 중 완료된 것 삭제 정돈
-        new_plans = [p for p in plans if not (p["done"] and "[일반]" in p.get("category", ""))]
+        new_plans = [
+            p for p in plans if not (p["done"] and "[일반]" in p.get("category", ""))
+        ]
 
         # 2. 루틴 항목들은 완료 상태만 Reset (중복 생성 방지)
         for p in new_plans:
@@ -1671,7 +1676,9 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
         weekly_tasks_dict = data.get("weekly_tasks", {})
         if today_weekday_kor in weekly_tasks_dict:
             existing_today_tasks = [
-                p["task"] for p in new_plans if p.get("category") == f"[{today_weekday_kor}요일 과제]"
+                p["task"]
+                for p in new_plans
+                if p.get("category") == f"[{today_weekday_kor}요일 과제]"
             ]
             for task_name in weekly_tasks_dict[today_weekday_kor]:
                 if task_name not in existing_today_tasks:
@@ -1778,15 +1785,14 @@ if __name__ == "__main__":
 
     job_queue = app.job_queue
 
-    # 정각 자정, 오전 8시, 토요일 21시 타임존 설정
     midnight_time = datetime.time(hour=0, minute=0, second=0, tzinfo=KST)
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=KST)
     sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=KST)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
-    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(5,))  # 5 = 토요일
+    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(5,))
     job_queue.run_daily(daily_routine_reset_job, time=midnight_time)
-    job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(6,))  # 6 = 일요일
+    job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(6,))
 
     job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
 
