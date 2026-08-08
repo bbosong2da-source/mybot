@@ -253,7 +253,8 @@ WELCOME_MESSAGES = [
     "• **오늘의 할 일:** `/l` (또는 `/list`)\n"
     "• **매일 루틴:** `/r [내용]`\n"
     "• **요일별 과제:** `/wt`\n"
-    "• **알림 시간 설정:** `/time [시:분]` (끄기: `/time off`)\n"
+    "• **알림 시간 설정:** `/t [시:분]` (또는 `/time`, 끄기: `/t off`)\n"
+    "• **루틴 수정:** `/e [기존루틴] > [새루틴]` (또는 `/edit`)\n"
     "• **성경 하루 분량:** `/bp [장수]` (예: `/bp 5`)\n"
     "• **성경 시작점:** `/bs [분량]` (예: `/bs 창 1장`)\n"
     "• **성경 완독 현황판:** `/st`\n"
@@ -593,9 +594,9 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏰ **일일 계획 점검 알림 시간 설정**\n\n"
             f"{status}\n\n"
             f"**사용 예시:**\n"
-            f"• `/time 22:00` (매일 밤 10시 알림)\n"
-            f"• `/time 08:30` (매일 아침 8시 30분 알림)\n"
-            f"• `/time off` (알림 해제)",
+            f"• `/t 22:00` (매일 밤 10시 알림)\n"
+            f"• `/t 08:30` (매일 아침 8시 30분 알림)\n"
+            f"• `/t off` (알림 해제)",
             parse_mode="Markdown"
         )
         return
@@ -608,7 +609,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     time_match = re.match(r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$", raw_args)
     if not time_match:
-        await update.message.reply_text("❌ 올바른 시간 형식이 아닙니다. `24시간 형식(HH:MM)`으로 입력해 주세요. (예: `/time 22:00`)", parse_mode="Markdown")
+        await update.message.reply_text("❌ 올바른 시간 형식이 아닙니다. `24시간 형식(HH:MM)`으로 입력해 주세요. (예: `/t 22:00`)", parse_mode="Markdown")
         return
 
     formatted_time = f"{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}"
@@ -1225,13 +1226,13 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plans = data.get("plans", [])
 
     text_content = update.message.text.strip()
-    raw_input = re.sub(r"^/(edit_routine|edit)\s*", "", text_content, flags=re.IGNORECASE).strip()
+    raw_input = re.sub(r"^/(edit_routine|edit|e)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
-    if "->" not in raw_input:
-        await update.message.reply_text("💡 형식: `/edit 기존루틴 -> 새루틴`", parse_mode="Markdown")
+    if ">" not in raw_input:
+        await update.message.reply_text("💡 형식: `/e 기존루틴 > 새루틴`", parse_mode="Markdown")
         return
 
-    old_name, new_name = [x.strip() for x in raw_input.split("->", 1)]
+    old_name, new_name = [x.strip() for x in raw_input.split(">", 1)]
 
     modified_count = 0
     for p in plans:
@@ -1271,6 +1272,84 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     thread_id = query.message.message_thread_id if query.message.message_thread_id else 0
     key = (chat_id, thread_id)
     data = query.data
+
+    # 🗑️ 저녁 알림 창에서 직접 삭제 클릭 시
+    if data.startswith("delete_item_"):
+        idx = int(data.split("_")[2])
+        topic_data = topic_plans.get(key, {})
+        plans = topic_data.get("plans", [])
+
+        if 0 <= idx < len(plans):
+            deleted_item = plans.pop(idx)
+            save_data_to_supabase(key, topic_plans[key])
+            await query.answer(f"🗑️ '{deleted_item['task']}' 항목이 삭제되었습니다.")
+
+            # 저녁 알림창 UI 즉시 갱신
+            now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
+            plans = topic_data.get("plans", [])
+            
+            normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
+            routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
+            bible_plans = [p for p in plans if p.get("is_bible") == True]
+
+            n_completed = sum(1 for p in normal_plans if p["done"])
+            n_total = len(normal_plans)
+            n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0.0
+
+            r_completed = sum(1 for p in routine_plans if p["done"])
+            r_total = len(routine_plans)
+
+            if bible_plans:
+                b_completed = sum(1 for p in bible_plans if p["done"])
+                b_total = len(bible_plans)
+                b_str = "완료 📖" if b_completed == b_total else "진행 중 🔥"
+            else:
+                b_str = "미설정 또는 진행 중 🔥"
+
+            uncompleted_with_index = [(i, p) for i, p in enumerate(plans) if not p["done"]]
+            
+            msg = (
+                f"🔔 **[오늘의 공부 점검 알림 - {now_str}]**\n\n"
+                f"오늘 계획하신 공부 및 성경 묵상은 차근차근 진행하고 계신가요?\n"
+                f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
+                f"📊 **오늘의 달성 현황:**\n"
+                f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
+                f"• **매일 루틴 달성:** `{r_completed}/{r_total}`\n"
+                f"• **오늘의 성경 묵상:** `{b_str}`\n\n"
+                f"📂 **[오늘의 남은 할 일]**\n"
+            )
+
+            keyboard = []
+            if uncompleted_with_index:
+                msg += "📋 버튼을 눌러 완료 처리하거나 🗑️ 삭제할 수 있습니다."
+                last_cat = None
+                for real_idx, item in uncompleted_with_index:
+                    cat = item.get("category", "")
+                    if cat and cat != last_cat:
+                        keyboard.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                        last_cat = cat
+
+                    if item.get("is_bible"):
+                        status_icon = "🔥"
+                    elif item.get("is_transcription"):
+                        status_icon = "☕️"
+                    else:
+                        status_icon = "🥚"
+
+                    keyboard.append([
+                        InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
+                        InlineKeyboardButton("🗑️ 삭제", callback_data=f"delete_item_{real_idx}")
+                    ])
+            else:
+                msg += "🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+            try:
+                await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    print(f"알림 수정 예외: {e}")
+        return
 
     if data.startswith("weekly_opt_"):
         await query.answer()
@@ -1594,7 +1673,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
 
             keyboard = []
             if uncompleted_with_index:
-                msg += "📋 아직 체크되지 않은 항목이 있습니다.\n채팅창에서 체크박스 버튼을 눌러 완료 처리하거나, 남은 저녁 시간 동안 달성할 목표를 입력해 보세요!(이월 혹은 삭제 가능)"
+                msg += "📋 버튼을 눌러 완료 처리하거나 🗑️ 삭제할 수 있습니다."
                 
                 last_cat = None
                 for real_idx, item in uncompleted_with_index:
@@ -1610,7 +1689,11 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     else:
                         status_icon = "🥚"
 
-                    keyboard.append([InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}")])
+                    # ⬇️ 각 항목별 토글 버튼과 🗑️ 삭제 버튼 배치
+                    keyboard.append([
+                        InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
+                        InlineKeyboardButton("🗑️ 삭제", callback_data=f"delete_item_{real_idx}")
+                    ])
             else:
                 msg += "🥳 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
 
@@ -1736,7 +1819,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "transcription_v_idx": next_v_idx
                 })
         
-        # 변경 사항 Supabase 저장
         save_data_to_supabase(key, topic_plans[key])
 
 async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
@@ -1751,7 +1833,6 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         save_data_to_supabase(key, topic_plans[key])
 
 async def post_init(application):
-    # 📥 봇 시작 시 Supabase에서 기존 데이터 전체 복원
     load_data_from_supabase()
 
     user_commands = [
@@ -1766,9 +1847,9 @@ async def post_init(application):
         BotCommand("tp", "하루 필사할 성경 절수 설정 (/tr_pages)"),
         BotCommand("tst", "성경 66권 필사 현황판 보기 (/tr_status)"),
         BotCommand("d", "할 일 삭제 (/del)"),
-        BotCommand("time", "일일 점검 알림 시간 설정"),
+        BotCommand("t", "일일 점검 알림 시간 설정 (/time)"),
+        BotCommand("e", "등록된 매일 루틴 수정 (/edit)"),
         BotCommand("w", "주간 공부/성경 달성률 리포트 (/weekly)"),
-        BotCommand("edit", "등록된 매일 루틴 수정"),
         BotCommand("rs", "오늘 계획 초기화 (/reset)"),
         BotCommand("off", "이 토픽에서 봇 비활성화"),
         BotCommand("on", "이 토픽에서 봇 재활성화"),
@@ -1795,6 +1876,13 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is alive!")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
 def run_health_check_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
@@ -1813,7 +1901,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler(["weekly_task", "WEEKLY_TASK", "Weekly_task", "wt", "WT"], add_weekly_task))
     app.add_handler(CommandHandler(["broadcast", "BROADCAST", "Broadcast", "bc", "BC"], broadcast_task))
     app.add_handler(CommandHandler(["broadcast_report", "BROADCAST_REPORT", "bcr", "BCR"], broadcast_report))
-    app.add_handler(CommandHandler(["time", "TIME", "Time"], set_notify_time))
+    app.add_handler(CommandHandler(["time", "TIME", "Time", "t", "T"], set_notify_time))
     app.add_handler(CommandHandler(["bible_pages", "BIBLE_PAGES", "bp", "BP"], bible_pages))
     app.add_handler(CommandHandler(["bible_start", "BIBLE_START", "bs", "BS"], bible_start))
     app.add_handler(CommandHandler(["bible_status", "BIBLE_STATUS", "st", "ST"], bible_status))
@@ -1821,7 +1909,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler(["tr_start", "TR_START", "ts", "TS"], transcription_start))
     app.add_handler(CommandHandler(["tr_status", "TR_STATUS", "tst", "TST"], transcription_status))
     app.add_handler(CommandHandler(["delete", "del", "d", "DELETE", "DEL", "D"], delete_plan))
-    app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE"], edit_routine))
+    app.add_handler(CommandHandler(["edit", "edit_routine", "EDIT", "EDIT_ROUTINE", "e", "E"], edit_routine))
     app.add_handler(CommandHandler(["list", "ls", "LIST", "LS", "List", "l", "L"], list_plans))
     app.add_handler(CommandHandler(["weekly", "WEEKLY", "Weekly", "w", "W"], weekly_plans))
     app.add_handler(CommandHandler(["reset", "RESET", "Reset", "rs", "RS"], reset_plans))
