@@ -145,7 +145,7 @@ def load_data_from_supabase():
             if not key_str or "_" not in key_str:
                 continue
                 
-            key_parts = key_str.split("_")
+            key_parts = key_str.rsplit("_", 1)
             
             if len(key_parts) == 2 and key_parts[0].lstrip("-").isdigit() and key_parts[1].isdigit():
                 chat_id = int(key_parts[0])
@@ -295,7 +295,7 @@ WEEKLY_TASK_PROMPT_MSG = (
     "📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
     "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
     "**💡 작성 예시:**\n"
-    "`/wt` 입력 후 아래 줄에 적어주시면 해당 요일 자정에 자동으로 오늘 할 일로 추가됩니다.\n"
+    "`/wt` 입력 후 아래 줄에 적어주시면 해당 요일 새벽 5시에 자동으로 오늘 할 일로 추가됩니다.\n"
     "```\n"
     "/wt\n"
     "월: 과제 제출, 데이터 분석 강의\n"
@@ -919,6 +919,7 @@ def get_category_priority(category_name):
 def build_plan_view(key, visible_indices=None):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
+    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
 
     if not plans:
         return (
@@ -926,8 +927,23 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
-    plans_with_index = list(enumerate(plans))
-    plans_with_index.sort(
+    # 🎯 오늘 날짜에 해당하는 항목 또는 미완료 최신 1개 항목 위주로 체크박스 구성 (과거 중복 방지)
+    today_plans_with_index = [
+        (idx, p) for idx, p in enumerate(plans)
+        if p.get("date") == today_str or not p.get("done")
+    ]
+    
+    seen_tasks = set()
+    filtered_plans_with_index = []
+    for idx, p in reversed(today_plans_with_index):
+        task_key = (p.get("category"), p.get("task"))
+        if task_key not in seen_tasks:
+            seen_tasks.add(task_key)
+            filtered_plans_with_index.append((idx, p))
+    
+    filtered_plans_with_index.reverse()
+
+    filtered_plans_with_index.sort(
         key=lambda x: (
             get_category_priority(x[1].get("category", "")),
             x[1].get("category", ""),
@@ -936,10 +952,11 @@ def build_plan_view(key, visible_indices=None):
         )
     )
 
-    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
-    routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
-    bible_plans = [p for p in plans if p.get("is_bible") == True]
-    transcription_plans = [p for p in plans if p.get("is_transcription") == True]
+    today_only_plans = [p for _, p in filtered_plans_with_index]
+    normal_plans = [p for p in today_only_plans if "[매일]" not in p.get("category", "")]
+    routine_plans = [p for p in today_only_plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
+    bible_plans = [p for p in today_only_plans if p.get("is_bible") == True]
+    transcription_plans = [p for p in today_only_plans if p.get("is_transcription") == True]
 
     stat_lines = []
 
@@ -971,8 +988,8 @@ def build_plan_view(key, visible_indices=None):
 
     stat_str = "\n".join(stat_lines)
 
-    completed_count = sum(1 for p in plans if p["done"])
-    total_count = len(plans)
+    completed_count = sum(1 for p in today_only_plans if p["done"])
+    total_count = len(today_only_plans)
 
     if completed_count == total_count and total_count > 0:
         text = (
@@ -988,7 +1005,7 @@ def build_plan_view(key, visible_indices=None):
         )
 
     category_uncompleted_count = {}
-    for _, item in plans_with_index:
+    for _, item in filtered_plans_with_index:
         cat = item.get("category", "")
         if cat not in category_uncompleted_count:
             category_uncompleted_count[cat] = 0
@@ -998,7 +1015,7 @@ def build_plan_view(key, visible_indices=None):
     keyboard = []
     last_category = None
 
-    for real_idx, item in plans_with_index:
+    for real_idx, item in filtered_plans_with_index:
         category = item.get("category", "")
         
         should_show = (visible_indices is not None and real_idx in visible_indices) or \
@@ -1468,7 +1485,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_item["done"] = not was_done
             save_data_to_supabase(key, topic_plans[key])
 
-            # 🎯 팝업 메시지 (새 성경 명언 적용)
             if target_item["done"] and random.random() < 0.10:
                 cheer_pop = random.choice([
                     "🌿 한 걸음 더 성장하셨네요! 수고하셨어요!",
@@ -1551,33 +1567,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
-                current_visible_indices = set()
-                if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
-                    for row in query.message.reply_markup.inline_keyboard:
-                        for btn in row:
-                            if btn.callback_data and btn.callback_data.startswith("toggle_"):
-                                try:
-                                    b_idx = int(btn.callback_data.split("_")[1])
-                                    current_visible_indices.add(b_idx)
-                                except ValueError:
-                                    pass
-
-                if not current_visible_indices:
-                    current_visible_indices = None
-
-                text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
-                if "-------------------------" in original_text:
-                    header = original_text.split("-------------------------")[0]
-                    text_instant = f"{header}-------------------------\n{text_instant}"
-
-                try:
-                    await query.edit_message_text(text_instant, reply_markup=reply_markup_instant, parse_mode="Markdown")
-                except Exception as e:
-                    if "Message is not modified" not in str(e):
-                        print(f"메시지 수정 예외: {e}")
-
-                await asyncio.sleep(1)
-
                 if is_bible_task and target_item["done"]:
                     curr_ch_idx = target_item.get("bible_ch_idx", 0)
                     chunk_size = topic_data.get("bible_chunk", 4)
@@ -1776,6 +1765,7 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
+# 🎯 익일 05시 마감 및 새 루틴 자동 추가 함수
 async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
     today_str = now.strftime("%m/%d")
@@ -1786,25 +1776,43 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
             continue
         plans = data.get("plans", [])
         
-        routine_tasks = list(dict.fromkeys([p["task"] for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]))
-        for task_name in routine_tasks:
-            plans.append({
-                "task": task_name,
-                "category": "[매일]",
-                "done": False,
-                "date": today_str,
-            })
-
-        weekly_tasks_dict = data.get("weekly_tasks", {})
-        if today_weekday_kor in weekly_tasks_dict:
-            for task_name in weekly_tasks_dict[today_weekday_kor]:
+        # 1. 고유한 매일 루틴 이름 추출
+        routine_names = list(dict.fromkeys([
+            p["task"] for p in plans 
+            if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")
+        ]))
+        
+        # 2. 오늘 날짜 루틴 1개씩 추가 (중복 방지)
+        for task_name in routine_names:
+            already_exists = any(
+                p["task"] == task_name and p.get("date") == today_str and "[매일]" in p.get("category", "")
+                for p in plans
+            )
+            if not already_exists:
                 plans.append({
                     "task": task_name,
-                    "category": f"[{today_weekday_kor}요일 과제]",
+                    "category": "[매일]",
                     "done": False,
                     "date": today_str,
                 })
 
+        # 3. 요일별 지정 과제 자동 추가
+        weekly_tasks_dict = data.get("weekly_tasks", {})
+        if today_weekday_kor in weekly_tasks_dict:
+            for task_name in weekly_tasks_dict[today_weekday_kor]:
+                already_exists = any(
+                    p["task"] == task_name and p.get("date") == today_str
+                    for p in plans
+                )
+                if not already_exists:
+                    plans.append({
+                        "task": task_name,
+                        "category": f"[{today_weekday_kor}요일 과제]",
+                        "done": False,
+                        "date": today_str,
+                    })
+
+        # 4. 성경 읽기 자동 이월 (완료했을 때만 다음 분량 생성)
         bible_plans = [p for p in plans if p.get("is_bible") == True]
         if bible_plans:
             last_bible = bible_plans[-1]
@@ -1825,6 +1833,7 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "bible_ch_idx": next_ch_idx
                 })
 
+        # 5. 성경 필사 자동 이월
         transcription_plans = [p for p in plans if p.get("is_transcription") == True]
         if transcription_plans:
             last_trans = transcription_plans[-1]
@@ -1959,14 +1968,15 @@ if __name__ == "__main__":
     job_queue = app.job_queue
     tz = pytz.timezone("Asia/Seoul")
 
-    midnight_time = datetime.datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).time()
+    # 🎯 익일 오전 5시 마감 스케줄러 시간 적용
+    reset_time = datetime.time(hour=5, minute=0, second=0, tzinfo=tz)
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
     sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=tz)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
     job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(6,))
-    job_queue.run_daily(daily_routine_reset_job, time=midnight_time)
-    job_queue.run_daily(sunday_rollover_job, time=midnight_time, days=(0,))
+    job_queue.run_daily(daily_routine_reset_job, time=reset_time)
+    job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(0,))
     
     job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
 
