@@ -927,7 +927,7 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
-    # 🎯 오늘 날짜에 해당하는 항목 또는 미완료 최신 1개 항목 위주로 체크박스 구성 (과거 중복 방지)
+    # 오늘 날짜에 해당하는 항목 또는 미완료 최신 1개 항목 위주로 체크박스 구성 (과거 중복 방지)
     today_plans_with_index = [
         (idx, p) for idx, p in enumerate(plans)
         if p.get("date") == today_str or not p.get("done")
@@ -1474,6 +1474,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("🌧️ 초기화가 취소되었습니다.")
         return
 
+    # 🎯 1초 대기 애니메이션이 적용된 항목 체크 토글 핸들러
     if data.startswith("toggle_"):
         idx = int(data.split("_")[1])
         topic_data = topic_plans.get(key, {})
@@ -1485,6 +1486,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_item["done"] = not was_done
             save_data_to_supabase(key, topic_plans[key])
 
+            # 🎯 팝업 메시지 (10% 확률)
             if target_item["done"] and random.random() < 0.10:
                 cheer_pop = random.choice([
                     "🌿 한 걸음 더 성장하셨네요! 수고하셨어요!",
@@ -1567,6 +1569,35 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
+                current_visible_indices = set()
+                if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
+                    for row in query.message.reply_markup.inline_keyboard:
+                        for btn in row:
+                            if btn.callback_data and btn.callback_data.startswith("toggle_"):
+                                try:
+                                    b_idx = int(btn.callback_data.split("_")[1])
+                                    current_visible_indices.add(b_idx)
+                                except ValueError:
+                                    pass
+
+                if not current_visible_indices:
+                    current_visible_indices = None
+
+                # 🎬 [1단계] 즉시 까마귀/완료 상태 아이콘으로 버튼 갱신
+                text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
+                if "-------------------------" in original_text:
+                    header = original_text.split("-------------------------")[0]
+                    text_instant = f"{header}-------------------------\n{text_instant}"
+
+                try:
+                    await query.edit_message_text(text_instant, reply_markup=reply_markup_instant, parse_mode="Markdown")
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        print(f"메시지 수정 예외: {e}")
+
+                # 🎬 [2단계] 까마귀로 변한 모습을 사용자가 확인할 수 있도록 1초 대기
+                await asyncio.sleep(1)
+
                 if is_bible_task and target_item["done"]:
                     curr_ch_idx = target_item.get("bible_ch_idx", 0)
                     chunk_size = topic_data.get("bible_chunk", 4)
@@ -1593,6 +1624,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["transcription_v_idx"] = next_v_idx
                     save_data_to_supabase(key, topic_plans[key])
 
+                # 🎬 [3단계] 1초 후 완료된 항목 및 섹션 정리 후 최종 화면 전환
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1765,7 +1797,6 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-# 🎯 익일 05시 마감 및 새 루틴 자동 추가 함수
 async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
     today_str = now.strftime("%m/%d")
@@ -1776,13 +1807,11 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
             continue
         plans = data.get("plans", [])
         
-        # 1. 고유한 매일 루틴 이름 추출
         routine_names = list(dict.fromkeys([
             p["task"] for p in plans 
             if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")
         ]))
         
-        # 2. 오늘 날짜 루틴 1개씩 추가 (중복 방지)
         for task_name in routine_names:
             already_exists = any(
                 p["task"] == task_name and p.get("date") == today_str and "[매일]" in p.get("category", "")
@@ -1796,7 +1825,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "date": today_str,
                 })
 
-        # 3. 요일별 지정 과제 자동 추가
         weekly_tasks_dict = data.get("weekly_tasks", {})
         if today_weekday_kor in weekly_tasks_dict:
             for task_name in weekly_tasks_dict[today_weekday_kor]:
@@ -1812,7 +1840,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                         "date": today_str,
                     })
 
-        # 4. 성경 읽기 자동 이월 (완료했을 때만 다음 분량 생성)
         bible_plans = [p for p in plans if p.get("is_bible") == True]
         if bible_plans:
             last_bible = bible_plans[-1]
@@ -1833,7 +1860,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                     "bible_ch_idx": next_ch_idx
                 })
 
-        # 5. 성경 필사 자동 이월
         transcription_plans = [p for p in plans if p.get("is_transcription") == True]
         if transcription_plans:
             last_trans = transcription_plans[-1]
@@ -1968,7 +1994,6 @@ if __name__ == "__main__":
     job_queue = app.job_queue
     tz = pytz.timezone("Asia/Seoul")
 
-    # 🎯 익일 오전 5시 마감 스케줄러 시간 적용
     reset_time = datetime.time(hour=5, minute=0, second=0, tzinfo=tz)
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
     sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=tz)
