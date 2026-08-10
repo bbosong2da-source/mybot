@@ -199,7 +199,7 @@ def get_transcription_label(start_verse_idx, chunk_size):
 def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
-    msg += "완성: 📖 | 진행중: 📜 | 시작 전: ✉️\n\n"
+    msg += "완성: 📖 | 진행중: 📜 | 시작 전: 📘\n\n"
     msg += "📘 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, total_ch, _) in enumerate(BIBLE_STRUCTURE):
@@ -215,7 +215,7 @@ def generate_bible_status_text(current_ch_idx):
         elif book_start_idx <= current_ch_idx <= book_end_idx:
             status_icon = "📜"
         else:
-            status_icon = "✉️"
+            status_icon = "📘"
 
         msg += f"{status_icon} `{short_name}` "
 
@@ -232,7 +232,7 @@ def generate_bible_status_text(current_ch_idx):
 def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
     msg = "✍🏻 **[성경 66권 필사 현황판]**\n"
-    msg += "한 후: 🪿 | 하는중: 🪵 | 하기 전: 🌿\n\n"
+    msg += "한 후: ☕️ | 하는중: 📜 | 하기 전: 📘\n\n"
     msg += "📘 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, _, verse_counts) in enumerate(BIBLE_STRUCTURE):
@@ -245,11 +245,11 @@ def generate_transcription_status_text(current_v_idx):
             msg += "\n\n📕 **[신약 27권]**\n"
 
         if current_v_idx > book_end_v_idx:
-            status_icon = "🪿"
+            status_icon = "☕️"
         elif book_start_v_idx <= current_v_idx <= book_end_v_idx:
-            status_icon = "🪵"
+            status_icon = "📜"
         else:
-            status_icon = "🌿"
+            status_icon = "📘"
 
         msg += f"{status_icon} `{short_name}` "
 
@@ -952,7 +952,7 @@ def get_category_priority(category_name):
     elif category_name == "[일반]": return 99
     else: return 3
 
-def build_plan_view(key, visible_indices=None):
+def build_plan_view(key, visible_indices=None, is_night_mode=False):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
     ddays = data.get("ddays", {})
@@ -1037,9 +1037,9 @@ def build_plan_view(key, visible_indices=None):
         r_total = len(routine_plans)
         r_rate = (r_completed / r_total) * 100 if r_total > 0 else 0
         if r_completed == r_total and r_total > 0:
-            stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확!) ☁️")
+            stat_lines.append(f"☕️ **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확!) ☁️")
         else:
-            stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total})")
+            stat_lines.append(f"☕️ **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total})")
 
     if bible_plans:
         b_completed = sum(1 for p in bible_plans if p["done"])
@@ -1049,7 +1049,7 @@ def build_plan_view(key, visible_indices=None):
 
     if transcription_plans:
         t_completed = sum(1 for p in transcription_plans if p["done"])
-        t_status_str = "한 후 🪿" if t_completed > 0 else "하는 중 🪵"
+        t_status_str = "한 후 ☕️" if t_completed > 0 else "하는 중 📜"
         trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '')
         stat_lines.append(f"✍🏻 **성경 필사:** {trans_task_name} (`{t_status_str}`)")
 
@@ -1087,8 +1087,11 @@ def build_plan_view(key, visible_indices=None):
     for real_idx, item in filtered_plans_with_index:
         category = item.get("category", "")
         
-        should_show = (visible_indices is not None and real_idx in visible_indices) or \
-                      (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
+        if is_night_mode:
+            should_show = (not item["done"]) or (visible_indices is not None and real_idx in visible_indices)
+        else:
+            should_show = (visible_indices is not None and real_idx in visible_indices) or \
+                          (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
         if should_show:
             if category and category != last_category:
@@ -1106,18 +1109,25 @@ def build_plan_view(key, visible_indices=None):
             if item.get("is_bible"):
                 status_icon = "📖" if item["done"] else "📜"
             elif item.get("is_transcription"):
-                status_icon = "🪿" if item["done"] else "🪵"
+                status_icon = "☕️" if item["done"] else "📜"
             elif is_routine:
-                status_icon = "🍋" if item["done"] else "🥚"
+                status_icon = "☕️" if item["done"] else "🥚"
             else:
                 status_icon = "🎓" if item["done"] else "🥚"
 
-            # [지연 스택 표시]
             delay = item.get("delay_count", 0)
             delay_str = f"[🔥지연 D+{delay}] " if delay > 0 and not item["done"] else ""
 
             btn_text = f"{status_icon} {delay_str}{item['task']}"
-            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"toggle_{real_idx}")])
+            task_btn = InlineKeyboardButton(btn_text, callback_data=f"toggle_{real_idx}")
+            
+            is_special = is_routine or item.get("is_bible") or item.get("is_transcription")
+            
+            if is_night_mode and not is_special:
+                del_btn = InlineKeyboardButton("삭제", callback_data=f"del_alert_{real_idx}")
+                keyboard.append([task_btn, del_btn])
+            else:
+                keyboard.append([task_btn])
 
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     return text, reply_markup
@@ -1154,7 +1164,7 @@ def build_weekly_view(key):
                 1 for p in routine_plans if p["task"] == task_name and p["done"]
             )
             if completed_count >= 7:
-                msg += f"• **{task_name}:** `{completed_count}/7` - (수확!) 🍋\n"
+                msg += f"• **{task_name}:** `{completed_count}/7` - (수확!) ☕️\n"
             else:
                 msg += f"• **{task_name}:** `{completed_count}/7` 완료\n"
         msg += "\n"
@@ -1212,7 +1222,7 @@ def build_weekly_view(key):
 
             is_routine = "[매일]" in cat
             if p.get("is_bible"): icon = "📜"
-            elif p.get("is_transcription"): icon = "🪵"
+            elif p.get("is_transcription"): icon = "📜"
             elif is_routine: icon = "🥚"
             else: icon = "🥚"
 
@@ -1505,6 +1515,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (chat_id, thread_id)
     data = query.data
 
+    if data.startswith("del_alert_"):
+        await query.answer("이 할 일을 삭제하려면 채팅창에 /d [번호] [취소사유 10자 이상]을 입력해 주세요.", show_alert=True)
+        return
+
     if data.startswith("pick_"):
         idx = int(data.split("_")[1])
         topic_data = topic_plans.get(key, {})
@@ -1698,7 +1712,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     congrat_msg = (
                         f"🌱 **축하합니다! [{full_name}] 필사를 완필하셨습니다!** 👏🏻✨\n\n"
                         f"한 절 한 절 정성껏 남기신 노고에 박수를 보냅니다!\n"
-                        f"다음 권인 **[{next_full_name}]**도 힘차게 써나가 보세요! 🪿\n\n"
+                        f"다음 권인 **[{next_full_name}]**도 힘차게 써나가 보세요! ☕️\n\n"
                         f"-------------------------\n"
                         f"{t_status_board_text}"
                     )
@@ -1710,6 +1724,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
 
             original_text = query.message.text or ""
+            is_night_mode = "야간 정원 점검" in original_text
+
             current_visible_indices = set()
             if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
                 for row in query.message.reply_markup.inline_keyboard:
@@ -1721,10 +1737,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             except ValueError:
                                 pass
 
-            if not current_visible_indices:
-                current_visible_indices = None
+            # 방금 클릭한 항목을 1초 동안 보여주기 위해 강제로 추가
+            current_visible_indices.add(idx)
 
-            text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
+            text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices, is_night_mode=is_night_mode)
             if "-------------------------" in original_text:
                 header = original_text.split("-------------------------")[0]
                 text_instant = f"{header}-------------------------\n{text_instant}"
@@ -1760,7 +1776,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_item["transcription_v_idx"] = next_v_idx
                 save_data_to_supabase(key, topic_plans[key])
 
-            text_final, reply_markup_final = build_plan_view(key)
+            # 1초 뒤 클릭한 항목을 visible_indices에서 제거하여 (완료된 경우) 렌더링에서 자연스럽게 사라지도록 처리
+            current_visible_indices.discard(idx)
+            if not current_visible_indices:
+                current_visible_indices = None
+
+            text_final, reply_markup_final = build_plan_view(key, visible_indices=current_visible_indices, is_night_mode=is_night_mode)
             if "-------------------------" in original_text:
                 header = original_text.split("-------------------------")[0]
                 text_final = f"{header}-------------------------\n{text_final}"
@@ -1811,7 +1832,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
         if user_notify_time and user_notify_time == now_str:
             chat_id, thread_id = key
             
-            plan_text, reply_markup = build_plan_view(key)
+            plan_text, reply_markup = build_plan_view(key, is_night_mode=True)
             msg = (
                 f"🌙 **[야간 정원 점검 - {now_str}]**\n\n"
                 f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
