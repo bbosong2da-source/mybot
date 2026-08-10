@@ -7,7 +7,14 @@ import asyncio
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from supabase import create_client, Client
-from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -178,7 +185,6 @@ def get_bible_label(start_chapter_idx, chunk_size):
     else:
         return f"{start_book} {start_ch}장 - {end_book} {end_ch}장"
 
-# 🎯 필사 라벨 표기법 수정 ('절' 제외 및 - 표기)
 def get_transcription_label(start_verse_idx, chunk_size):
     end_verse_idx = min(start_verse_idx + chunk_size - 1, len(ALL_BIBLE_VERSES) - 1)
     start_book, start_ch, start_v = ALL_BIBLE_VERSES[start_verse_idx]
@@ -2054,6 +2060,7 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
         save_data_to_supabase(key, topic_plans[key])
 
+# 🎯 그룹/토픽 방에서는 자동완성이 차단되도록 Scope 분리 적용
 async def post_init(application):
     load_data_from_supabase()
 
@@ -2076,8 +2083,20 @@ async def post_init(application):
         BotCommand("off", "이 토픽에서 봇 비활성화"),
         BotCommand("on", "이 토픽에서 봇 재활성화"),
     ]
-    await application.bot.set_my_commands(user_commands)
 
+    # 1. 🎯 기본/그룹/토픽 방의 명령어 자동완성 삭제
+    await application.bot.delete_my_commands()
+
+    # 2. 🎯 1:1 개인 대화방(Private Chats)에만 명령어 목록 등록
+    try:
+        await application.bot.set_my_commands(
+            user_commands,
+            scope=BotCommandScopeAllPrivateChats()
+        )
+    except Exception as e:
+        print(f"개인방 명령어 메뉴 등록 실패: {e}")
+
+    # 3. 🎯 관리자(ADMIN_ID) 전용 채팅방 메뉴 등록
     admin_commands = user_commands + [
         BotCommand("re", "[관리자] 답변 전송 (/reply)"),
         BotCommand("bc", "[관리자] 공지 과제 발송 (/broadcast)"),
