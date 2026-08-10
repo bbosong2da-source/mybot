@@ -178,6 +178,7 @@ def get_bible_label(start_chapter_idx, chunk_size):
     else:
         return f"{start_book} {start_ch}장 - {end_book} {end_ch}장"
 
+# 🎯 필사 라벨 표기법 수정 ('절' 제외 및 - 표기)
 def get_transcription_label(start_verse_idx, chunk_size):
     end_verse_idx = min(start_verse_idx + chunk_size - 1, len(ALL_BIBLE_VERSES) - 1)
     start_book, start_ch, start_v = ALL_BIBLE_VERSES[start_verse_idx]
@@ -186,10 +187,10 @@ def get_transcription_label(start_verse_idx, chunk_size):
     if start_book == end_book:
         if start_ch == end_ch:
             if start_v == end_v:
-                return f"{start_book} {start_ch}:{start_v}절"
-            return f"{start_book} {start_ch}:{start_v}~{end_v}절"
-        return f"{start_book} {start_ch}:{start_v}절 - {end_ch}:{end_v}절"
-    return f"{start_book} {start_ch}:{start_v}절 - {end_book} {end_ch}:{end_v}절"
+                return f"{start_book} {start_ch}:{start_v}"
+            return f"{start_book} {start_ch}:{start_v}-{end_v}"
+        return f"{start_book} {start_ch}:{start_v} - {end_ch}:{end_v}"
+    return f"{start_book} {start_ch}:{start_v} - {end_book} {end_ch}:{end_v}"
 
 def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
@@ -1018,6 +1019,7 @@ def build_plan_view(key, visible_indices=None):
     for real_idx, item in filtered_plans_with_index:
         category = item.get("category", "")
         
+        # 🎯 1초 애니메이션 동안 잔상이 유지되도록 visible_indices 체크 보완
         should_show = (visible_indices is not None and real_idx in visible_indices) or \
                       (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
@@ -1478,7 +1480,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("🌧️ 초기화가 취소되었습니다.")
         return
 
-    # 🎯 1초 대기 애니메이션 및 삭제 버튼 레이아웃 분리 토글 핸들러
+    # 🎯 1초 애니메이션 / 섹션 마지막 항목 잔상 유지 / 성경 제자리 리뉴얼 토글 핸들러
     if data.startswith("toggle_"):
         idx = int(data.split("_")[1])
         topic_data = topic_plans.get(key, {})
@@ -1510,6 +1512,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_bible_task = target_item.get("is_bible", False)
             is_trans_task = target_item.get("is_transcription", False)
 
+            # 완독/완필 축하 메시지
             if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = topic_data.get("bible_chunk", 4)
@@ -1594,7 +1597,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📂 **[오늘의 남은 할 일]**\n"
                 )
 
-                # 🎬 [1단계] 즉시 까마귀 변경 & 삭제 버튼은 제거하여 UI 즉시 업데이트
+                # 🎬 [1단계] 즉시 까마귀 변경 상태 유지
                 keyboard_instant = []
                 if uncompleted_with_index:
                     msg += "📋 버튼을 눌러 완료 처리하거나 🍂 삭제할 수 있습니다."
@@ -1615,7 +1618,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         is_routine = "[매일]" in cat
                         is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
-                        # 클릭 직후에는 까마귀로 변하며 삭제 버튼을 가림
                         if item["done"] or is_special:
                             keyboard_instant.append([
                                 InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}")
@@ -1635,7 +1637,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"알림 수정 예외: {e}")
 
-                # 🎬 [2단계] 까마귀로 변한 모습을 확인할 수 있도록 1초 대기
+                # 🎬 [2단계] 1초 대기
                 await asyncio.sleep(1)
 
                 if is_bible_task and target_item["done"]:
@@ -1662,7 +1664,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["transcription_v_idx"] = next_v_idx
                     save_data_to_supabase(key, topic_plans[key])
 
-                # 🎬 [3단계] 1초 후 완료 처리된 항목 목록에서 정돈 제거
+                # 🎬 [3단계] 1초 후 완료 항목 정돈 및 성경/필사 리뉴얼
                 plans = topic_data.get("plans", [])
                 uncompleted_final = [(i, p) for i, p in enumerate(plans) if not p["done"]]
                 
@@ -1724,7 +1726,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
-                # 일반 `/l` (오늘의 할 일) 화면에서의 애니메이션
+                # 일반 `/l` (오늘의 할 일) 화면에서의 잔상 유지 애니메이션
                 current_visible_indices = set()
                 if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
                     for row in query.message.reply_markup.inline_keyboard:
@@ -1739,6 +1741,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not current_visible_indices:
                     current_visible_indices = None
 
+                # 🎬 [1단계] 까마귀로 즉시 변경하여 클릭 항목 잔상 강제 유지
                 text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1750,8 +1753,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
 
+                # 🎬 [2단계] 1초간 까마귀 유지
                 await asyncio.sleep(1)
 
+                # 🎬 [3단계] 성경/필사의 경우 글자 리뉴얼 및 상태 미완료로 재설정
                 if is_bible_task and target_item["done"]:
                     curr_ch_idx = target_item.get("bible_ch_idx", 0)
                     chunk_size = topic_data.get("bible_chunk", 4)
@@ -1776,6 +1781,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["transcription_v_idx"] = next_v_idx
                     save_data_to_supabase(key, topic_plans[key])
 
+                # 🎬 [4단계] 1초 후 최종 화면 전환 (완료된 일반 항목 정리 및 성경/필사 새 분량 표시)
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1883,7 +1889,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     else:
                         status_icon = "🥚"
 
-                    # 🎯 알림 발송 시 루틴, 성경, 필사는 삭제 버튼 제외
+                    # 알림 발송 시 루틴, 성경, 필사는 삭제 버튼 제외
                     is_routine = "[매일]" in cat
                     is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
