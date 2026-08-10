@@ -518,7 +518,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = []
     for t_idx, task in enumerate(tasks):
-        keyboard.append([InlineKeyboardButton(f"✉️ {task}", callback_data=f"bctoggle_{bc_id}_{t_idx}")])
+        keyboard.append([InlineKeyboardButton(f"🥚 {task}", callback_data=f"bctoggle_{bc_id}_{t_idx}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     success_count = 0
@@ -1110,7 +1110,7 @@ def build_plan_view(key, visible_indices=None):
             elif is_routine:
                 status_icon = "🍋" if item["done"] else "🌱"
             else:
-                status_icon = "🎓" if item["done"] else "✉️"
+                status_icon = "🎓" if item["done"] else "🥚"
 
             # [지연 스택 표시]
             delay = item.get("delay_count", 0)
@@ -1214,7 +1214,7 @@ def build_weekly_view(key):
             if p.get("is_bible"): icon = "📜"
             elif p.get("is_transcription"): icon = "🪵"
             elif is_routine: icon = "🌱"
-            else: icon = "✉️"
+            else: icon = "🥚"
 
             msg += f"  {icon} {p['task']}{date_str}\n"
             btn_label = f"{icon} {p['task']}{date_str}"
@@ -1581,7 +1581,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for i, task in enumerate(tasks):
                 is_done = user_records.get(i, False)
-                icon = "🐦‍⬛" if is_done else "✉️"
+                icon = "🐦‍⬛" if is_done else "🥚"
                 keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_{bc_id}_{i}")])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
