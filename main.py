@@ -1108,7 +1108,7 @@ def build_plan_view(key, visible_indices=None):
             elif item.get("is_transcription"):
                 status_icon = "🪿" if item["done"] else "🪵"
             elif is_routine:
-                status_icon = "🍋" if item["done"] else "🌱"
+                status_icon = "🍋" if item["done"] else "🥚"
             else:
                 status_icon = "🎓" if item["done"] else "🥚"
 
@@ -1213,7 +1213,7 @@ def build_weekly_view(key):
             is_routine = "[매일]" in cat
             if p.get("is_bible"): icon = "📜"
             elif p.get("is_transcription"): icon = "🪵"
-            elif is_routine: icon = "🌱"
+            elif is_routine: icon = "🥚"
             else: icon = "🥚"
 
             msg += f"  {icon} {p['task']}{date_str}\n"
