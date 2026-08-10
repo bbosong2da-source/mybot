@@ -122,7 +122,7 @@ for short_name, full_name, total_ch, verse_counts in BIBLE_STRUCTURE:
             ALL_BIBLE_VERSES.append((short_name, ch_num, v_num))
 
 # ---------------------------------------------------------
-# 💾 Supabase 연동 HELPER 함수 (DB 읽기 및 쓰기)
+# 💾 Supabase 연동 HELPER 함수
 # ---------------------------------------------------------
 topic_plans = {}
 
@@ -199,8 +199,8 @@ def get_transcription_label(start_verse_idx, chunk_size):
 def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
-    msg += "완성: 📖 | 진행중: 🪺 | 시작 전: 🥚\n\n"
-    msg += "📜 **[구약 39권]**\n"
+    msg += "완성: 📖 | 진행중: 📜 | 시작 전: ✉️\n\n"
+    msg += "📘 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, total_ch, _) in enumerate(BIBLE_STRUCTURE):
         book_start_idx = current_global_idx
@@ -208,14 +208,14 @@ def generate_bible_status_text(current_ch_idx):
         current_global_idx += total_ch
 
         if idx == 39:
-            msg += "\n\n✝️ **[신약 27권]**\n"
+            msg += "\n\n📕 **[신약 27권]**\n"
 
         if current_ch_idx > book_end_idx:
             status_icon = "📖"
         elif book_start_idx <= current_ch_idx <= book_end_idx:
-            status_icon = "🪺"
+            status_icon = "📜"
         else:
-            status_icon = "🥚"
+            status_icon = "✉️"
 
         msg += f"{status_icon} `{short_name}` "
 
@@ -233,7 +233,7 @@ def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
     msg = "✍️ **[성경 66권 필사 현황판]**\n"
     msg += "한 후: 🍪 | 하는중: ☕️ | 하기 전: 🧊\n\n"
-    msg += "📜 **[구약 39권]**\n"
+    msg += "📘 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, _, verse_counts) in enumerate(BIBLE_STRUCTURE):
         book_total_v = sum(verse_counts)
@@ -242,7 +242,7 @@ def generate_transcription_status_text(current_v_idx):
         current_global_v_idx += book_total_v
 
         if idx == 39:
-            msg += "\n\n✝️ **[신약 27권]**\n"
+            msg += "\n\n📕 **[신약 27권]**\n"
 
         if current_v_idx > book_end_v_idx:
             status_icon = "🍪"
@@ -518,7 +518,7 @@ async def broadcast_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = []
     for t_idx, task in enumerate(tasks):
-        keyboard.append([InlineKeyboardButton(f"🥚 {task}", callback_data=f"bctoggle_{bc_id}_{t_idx}")])
+        keyboard.append([InlineKeyboardButton(f"✉️ {task}", callback_data=f"bctoggle_{bc_id}_{t_idx}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     success_count = 0
@@ -875,7 +875,7 @@ async def transcription_status(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# NEW: 삭제 시 사유 강제 작성 로직 추가 (Feature 2)
+# 삭제 시 사유 강제 작성 로직 (Feature 2)
 # ---------------------------------------------------------
 async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -944,7 +944,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# NEW: UI 빌더 (Feature 1, Feature 3 연동)
+# UI 빌더 (Feature 1, Feature 3 연동 + 이모지 변경)
 # ---------------------------------------------------------
 def get_category_priority(category_name):
     if category_name == "[매일]": return 1
@@ -1043,7 +1043,7 @@ def build_plan_view(key, visible_indices=None):
 
     if bible_plans:
         b_completed = sum(1 for p in bible_plans if p["done"])
-        status_str = "완성 📖" if b_completed > 0 else "진행 중 🪺"
+        status_str = "완성 📖" if b_completed > 0 else "진행 중 📜"
         bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '')
         stat_lines.append(f"📖 **성경 묵상:** {bible_task_name} (`{status_str}`)")
 
@@ -1104,13 +1104,13 @@ def build_plan_view(key, visible_indices=None):
 
             is_routine = "[매일]" in category
             if item.get("is_bible"):
-                status_icon = "📖" if item["done"] else "🪺"
+                status_icon = "📖" if item["done"] else "📜"
             elif item.get("is_transcription"):
                 status_icon = "🍪" if item["done"] else "☕️"
             elif is_routine:
                 status_icon = "🍋" if item["done"] else "🌱"
             else:
-                status_icon = "🎓" if item["done"] else "🥚"
+                status_icon = "🎓" if item["done"] else "✉️"
 
             # [지연 스택 표시]
             delay = item.get("delay_count", 0)
@@ -1211,10 +1211,10 @@ def build_weekly_view(key):
             date_str = f" ({p['date']})" if "date" in p else ""
 
             is_routine = "[매일]" in cat
-            if p.get("is_bible"): icon = "🪺"
+            if p.get("is_bible"): icon = "📜"
             elif p.get("is_transcription"): icon = "☕️"
             elif is_routine: icon = "🌱"
-            else: icon = "🥚"
+            else: icon = "✉️"
 
             msg += f"  {icon} {p['task']}{date_str}\n"
             btn_label = f"{icon} {p['task']}{date_str}"
@@ -1227,7 +1227,7 @@ def build_weekly_view(key):
     return msg, reply_markup
 
 # ---------------------------------------------------------
-# NEW: D-Day & Master Task Pool Commands
+# D-Day & Master Task Pool Commands
 # ---------------------------------------------------------
 async def set_dday(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1255,7 +1255,7 @@ async def set_dday(update: Update, context: ContextTypes.DEFAULT_TYPE):
             topic_plans[key]["ddays"] = {}
         topic_plans[key]["ddays"][cat_key] = date_str
         save_data_to_supabase(key, topic_plans[key])
-        await update.message.reply_text(f"🎯 **{cat_key} 마감일이 {date_str}로 설정되었습니다!**\n상태창 상단에서 페이스를 확인하세요.", parse_mode="Markdown")
+        await update.message.reply_text(f"🎯 **{cat_key} 마마감일이 {date_str}로 설정되었습니다!**\n상태창 상단에서 페이스를 확인하세요.", parse_mode="Markdown")
     except ValueError:
         await update.message.reply_text("🌧️ 날짜 형식이 올바르지 않습니다. (예: 26/11/30)")
 
@@ -1312,7 +1312,7 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# 기존 Message Handler (태스크 바로 추가)
+# Message Handler (태스크 바로 추가)
 # ---------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1538,7 +1538,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_data_to_supabase(key, topic_plans[key])
             await query.answer(f"➖ '{deleted_item['task']}' 항목이 삭제되었습니다.")
             
-            # 이후 부분은 원본과 같이 리포트를 재생성합니다.
             text_instant, reply_markup_instant = build_plan_view(key)
             original_text = query.message.text or ""
             if "야간 정원 점검" in original_text:
@@ -1582,7 +1581,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for i, task in enumerate(tasks):
                 is_done = user_records.get(i, False)
-                icon = "🐦‍⬛" if is_done else "🥚"
+                icon = "🐦‍⬛" if is_done else "✉️"
                 keyboard.append([InlineKeyboardButton(f"{icon} {task}", callback_data=f"bctoggle_{bc_id}_{i}")])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1646,7 +1645,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "🎓 구름 위를 날아오르듯 학식과 지혜가 더욱 깊어졌어요!",
                     "🐦‍⬛ 까마귀가 높은 하늘에서 멋지게 날개를 펼쳤습니다!",
                     "🍋 오늘도 싱싱한 루틴 하나를 수확했습니다!",
-                    "🪺 둥지 속 말씀이 단단한 양식이 되어가고 있어요.",
+                    "📜 둥지 속 말씀이 단단한 양식이 되어가고 있어요.",
                     "☁️ 자연 속 정원이 한층 더 풍성해졌네요!"
                 ])
                 await query.answer(cheer_pop, show_alert=False)
@@ -1672,7 +1671,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     congrat_msg = (
                         f"🌱 **축하합니다! [{full_name}] 묵상을 완독하셨습니다!** 👏🏻✨\n\n"
                         f"끝까지 완수해내신 열정을 응원합니다!\n"
-                        f"다음 권인 **[{next_full_name}]**도 힘차게 이어나가 보세요! 🪺\n\n"
+                        f"다음 권인 **[{next_full_name}]**도 힘차게 이어나가 보세요! 📜\n\n"
                         f"-------------------------\n"
                         f"{status_board_text}"
                     )
@@ -1883,7 +1882,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
             continue
         plans = data.get("plans", [])
         
-        # [NEW: 지연 스택 페널티 부여]
         for p in plans:
             if not p.get("done") and "[매일]" not in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription"):
                 p["delay_count"] = p.get("delay_count", 0) + 1
