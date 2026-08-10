@@ -139,7 +139,6 @@ def get_korean_date_str():
 
 def get_korean_week_range_str():
     now = get_logical_now()
-    # 일요일을 한 주의 시작(0)으로 맞춤
     idx = now.weekday()
     sun = now - datetime.timedelta(days=(idx + 1) % 7)
     sat = sun + datetime.timedelta(days=6)
@@ -976,7 +975,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
                 days_left = (target_date - now_date).days
                 
                 pool_count = sum(1 for p in task_pool if p["category"] == cat)
-                plans_count = sum(1 for p in plans if p.get("category"] == cat and not p.get("done"))
+                plans_count = sum(1 for p in plans if p.get("category") == cat and not p.get("done"))
                 total_left = pool_count + plans_count
                 
                 if total_left == 0: continue
@@ -2124,9 +2123,9 @@ if __name__ == "__main__":
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
-    job_queue.run_daily(sunday_weekly_reminder, time=reset_time, days=(6,)) # 토요일 자정(일요일 새벽 5시)에 주간 리포트 발송
+    job_queue.run_daily(sunday_weekly_reminder, time=reset_time, days=(6,))
     job_queue.run_daily(daily_routine_reset_job, time=reset_time)
-    job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(6,)) # 일요일 새벽 5시에 미완료 항목 이월/정리
+    job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(6,))
     
     job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
 
