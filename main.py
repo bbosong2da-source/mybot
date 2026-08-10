@@ -41,7 +41,7 @@ if SUPABASE_URL and SUPABASE_KEY:
     except Exception as e:
         print(f"🌧️ Supabase 연결 실패: {e}")
 
-# 성경 전체 권, 장수 및 장별 총 절수 데이터 (구약 39권 + 신약 27권 = 총 1,189장 / 31,102절)
+# 성경 데이터
 BIBLE_STRUCTURE = [
     ("창", "창세기", 50, [31, 25, 24, 26, 32, 22, 24, 22, 29, 32, 32, 20, 18, 24, 21, 16, 27, 33, 38, 18, 34, 24, 20, 67, 34, 35, 46, 22, 35, 43, 55, 32, 20, 31, 29, 43, 36, 30, 23, 23, 57, 38, 34, 34, 28, 34, 31, 22, 33, 26]),
     ("출", "출애굽기", 40, [22, 25, 22, 31, 23, 30, 29, 32, 35, 29, 10, 51, 22, 31, 27, 36, 16, 27, 25, 26, 36, 31, 33, 18, 40, 37, 21, 43, 46, 38, 18, 35, 23, 35, 35, 38, 29, 31, 43, 38]),
@@ -127,7 +127,6 @@ for short_name, full_name, total_ch, verse_counts in BIBLE_STRUCTURE:
 topic_plans = {}
 
 def save_data_to_supabase(key, data):
-    """특정 (chat_id, thread_id) 키의 데이터를 Supabase DB에 저장/업데이트"""
     if not supabase_client:
         return
     key_str = f"{key[0]}_{key[1]}"
@@ -140,7 +139,6 @@ def save_data_to_supabase(key, data):
         print(f"🌧️ Supabase 저장 실패 ({key_str}): {e}")
 
 def load_data_from_supabase():
-    """봇 시작 시 Supabase DB에서 전체 데이터를 안전하게 로드"""
     global topic_plans
     if not supabase_client:
         return
@@ -201,7 +199,7 @@ def get_transcription_label(start_verse_idx, chunk_size):
 def generate_bible_status_text(current_ch_idx):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
-    msg += "완료: 🐦‍⬛ | 읽는중: 🪺 | 미완료: 🥚\n\n"
+    msg += "완성: 📖 | 진행중: 🪺 | 시작 전: 🥚\n\n"
     msg += "📜 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, total_ch, _) in enumerate(BIBLE_STRUCTURE):
@@ -213,7 +211,7 @@ def generate_bible_status_text(current_ch_idx):
             msg += "\n\n✝️ **[신약 27권]**\n"
 
         if current_ch_idx > book_end_idx:
-            status_icon = "🐦‍⬛"
+            status_icon = "📖"
         elif book_start_idx <= current_ch_idx <= book_end_idx:
             status_icon = "🪺"
         else:
@@ -234,7 +232,7 @@ def generate_bible_status_text(current_ch_idx):
 def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
     msg = "✍️ **[성경 66권 필사 현황판]**\n"
-    msg += "하기 전: 🧊 | 하는중: ☕️ | 한 후: 🍪\n\n"
+    msg += "한 후: 🍪 | 하는중: ☕️ | 하기 전: 🧊\n\n"
     msg += "📜 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, _, verse_counts) in enumerate(BIBLE_STRUCTURE):
@@ -266,7 +264,7 @@ def generate_transcription_status_text(current_v_idx):
     return msg
 
 WELCOME_MESSAGES = [
-    "👋🏻 **반갑습니다! 주 7일의 말씀 봇 안내** 🌿\n\n"
+    "☁️ **구름 언덕과 까마귀 정원에 오신 것을 환영합니다!** 🐦‍⬛\n\n"
     "• **할 일 등록:** 채팅창에 계획 입력 (`[카테고리명]` 지원)\n"
     "• **오늘의 할 일:** `/l` (또는 `/list`)\n"
     "• **매일 루틴:** `/r [내용]`\n"
@@ -280,18 +278,17 @@ WELCOME_MESSAGES = [
     "• **필사 시작점:** `/ts [구절]` (예: `/ts 창 1:1`)\n"
     "• **성경 필사 현황판:** `/tst`\n"
     "• **할 일 삭제:** `/d [번호 또는 이름]`\n"
-    "• **질문 보내기:** `질문: [내용]`\n"
     "• **주간 리포트:** `/w`\n"
     "• **계획 초기화:** `/rs`\n\n"
-    "🌱 오늘 달성할 계획을 입력하거나 성경 읽기 및 필사를 시작해 보세요!"
+    "🌱 배움의 씨앗을 심고 성경 묵상의 둥지를 틀어보세요!"
 ]
 
 CHEERING_MESSAGES = [
-    "🌿 멋진 목표네요! 오늘도 차근차근 달성해 봐요!",
-    "✨ 등록 완료! 분명 잘 해내실 거예요. 응원합니다!",
-    "🍃 작은 실행이 모여 큰 성장을 만듭니다. 화이팅!",
-    "👏🏻 계획을 세운 것부터 이미 절반은 성공이에요!",
-    "🌱 오늘의 노력이 결실을 맺을 거예요. 끝까지 달려봐요!",
+    "🌿 멋진 목표네요! 오늘도 싱그러운 하루 만들어봐요!",
+    "☁️ 구름 위로 훌쩍 날아오를 준비 완료! 응원합니다!",
+    "🐦‍⬛ 까마귀 정원에 소중한 씨앗이 심어졌어요. 화이팅!",
+    "🎓 지식의 나무가 또 한 뼘 자라날 거예요!",
+    "🍋 상큼한 결실을 향해 오늘도 기운 내세요!",
 ]
 
 WEEKDAY_KOR = ["월", "화", "수", "목", "금", "토", "일"]
@@ -622,7 +619,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if raw_args.lower() in ["off", "끄기", "해제"]:
         topic_plans[key]["notify_time"] = None
         save_data_to_supabase(key, topic_plans[key])
-        await update.message.reply_text("🌧️ **일일 계획 점검 알림이 해제되었습니다.**", parse_mode="Markdown")
+        await update.message.reply_text("➖ **일일 계획 점검 알림이 해제되었습니다.**", parse_mode="Markdown")
         return
 
     time_match = re.match(r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$", raw_args)
@@ -904,7 +901,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data_to_supabase(key, topic_plans[key])
         plan_text, reply_markup = build_plan_view(key)
         await update.message.reply_text(
-            f"🍂 **`{deleted_item['task']}` 항목이 삭제되었습니다.** (통계 분모에서 제외)\n\n"
+            f"➖ **`{deleted_item['task']}` 항목이 삭제되었습니다.** (통계 분모에서 제외)\n\n"
             f"-------------------------\n"
             f"{plan_text}",
             reply_markup=reply_markup,
@@ -934,7 +931,6 @@ def build_plan_view(key, visible_indices=None):
             None,
         )
 
-    # 오늘 날짜에 해당하는 항목 또는 미완료 최신 1개 항목 위주로 체크박스 구성 (과거 중복 방지)
     today_plans_with_index = [
         (idx, p) for idx, p in enumerate(plans)
         if p.get("date") == today_str or not p.get("done")
@@ -971,27 +967,28 @@ def build_plan_view(key, visible_indices=None):
         n_completed = sum(1 for p in normal_plans if p["done"])
         n_total = len(normal_plans)
         n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0
-        stat_lines.append(f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)")
+        stat_lines.append(f"🎓 **일반 공부:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)")
 
     if routine_plans:
         r_completed = sum(1 for p in routine_plans if p["done"])
         r_total = len(routine_plans)
+        r_rate = (r_completed / r_total) * 100 if r_total > 0 else 0
         if r_completed == r_total and r_total > 0:
-            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total} - (달성!)` 🌿")
+            stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확!) ☁️")
         else:
-            stat_lines.append(f"• **매일 루틴 달성:** `{r_completed}/{r_total}`")
+            stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total})")
 
     if bible_plans:
         b_completed = sum(1 for p in bible_plans if p["done"])
-        b_total = len(bible_plans)
-        status_str = "완료 📖" if b_completed == b_total else "진행 중 🪺"
-        stat_lines.append(f"• **오늘의 성경 묵상:** {bible_plans[0]['task'].replace('성경 묵상: ', '')} (`{status_str}`)")
+        status_str = "완성 📖" if b_completed > 0 else "진행 중 🪺"
+        bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '')
+        stat_lines.append(f"📖 **성경 묵상:** {bible_task_name} (`{status_str}`)")
 
     if transcription_plans:
         t_completed = sum(1 for p in transcription_plans if p["done"])
-        t_total = len(transcription_plans)
-        t_status_str = "한 후 🍪" if t_completed == t_total else "하는 중 ☕️"
-        stat_lines.append(f"• **오늘의 성경 필사:** {transcription_plans[0]['task'].replace('성경 필사: ', '')} (`{t_status_str}`)")
+        t_status_str = "한 후 🍪" if t_completed > 0 else "하는 중 ☕️"
+        trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '')
+        stat_lines.append(f"✍️ **성경 필사:** {trans_task_name} (`{t_status_str}`)")
 
     stat_str = "\n".join(stat_lines)
 
@@ -1000,15 +997,15 @@ def build_plan_view(key, visible_indices=None):
 
     if completed_count == total_count and total_count > 0:
         text = (
-            f"🌿 **ALL CLEAR!** ✨\n\n"
-            f"📊 **오늘의 달성 현황:**\n{stat_str}\n\n"
-            f"오늘의 모든 계획을 완수하셨습니다! 수고하셨어요! 🍃"
+            f"🌾 **오늘의 농사 완료! ALL CLEAR!** ☁️\n\n"
+            f"📊 **오늘의 정원 수확 현황:**\n{stat_str}\n\n"
+            f"오늘 심고 가꾼 모든 결실을 완벽히 수확하셨습니다! 수고 많으셨어요! 🐦‍⬛"
         )
     else:
         text = (
-            f"📝 **오늘의 공부 점검**\n\n"
-            f"📊 **달성 현황:**\n{stat_str}\n\n"
-            f"버튼을 누르면 완료 상태로 전환되며, 카테고리의 모든 일을 마치면 섹션이 자동으로 정돈됩니다.\n"
+            f"🌿 **구름 언덕과 까마귀 정원**\n\n"
+            f"📊 **오늘의 정원 수확 현황:**\n{stat_str}\n\n"
+            f"버튼을 누르면 달성 상태로 전환되며 수확이 완료됩니다.\n"
         )
 
     category_uncompleted_count = {}
@@ -1025,23 +1022,32 @@ def build_plan_view(key, visible_indices=None):
     for real_idx, item in filtered_plans_with_index:
         category = item.get("category", "")
         
-        # 🎯 1초 애니메이션 동안 잔상이 유지되도록 visible_indices 체크 보완
         should_show = (visible_indices is not None and real_idx in visible_indices) or \
                       (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
 
         if should_show:
             if category and category != last_category:
+                if category == "[매일]":
+                    cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                elif "요일" in category:
+                    cat_disp = "📅 [요일별 수확 과제]"
+                else:
+                    cat_disp = f"☁️ {category.replace('[일반]', '[구름 언덕 공부방]')}"
+
                 keyboard.append(
-                    [InlineKeyboardButton(f"📂 {category}", callback_data="noop")]
+                    [InlineKeyboardButton(cat_disp, callback_data="noop")]
                 )
                 last_category = category
 
+            is_routine = "[매일]" in category
             if item.get("is_bible"):
                 status_icon = "📖" if item["done"] else "🪺"
             elif item.get("is_transcription"):
                 status_icon = "🍪" if item["done"] else "☕️"
+            elif is_routine:
+                status_icon = "🍋" if item["done"] else "🌱"
             else:
-                status_icon = "🐦‍⬛" if item["done"] else "🥚"
+                status_icon = "🎓" if item["done"] else "🥚"
 
             btn_text = f"{status_icon} {item['task']}"
             keyboard.append(
@@ -1072,10 +1078,10 @@ def build_weekly_view(key):
         n_completed = sum(1 for p in normal_plans if p["done"])
         n_total = len(normal_plans)
         n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0
-        msg += f"📊 **주간 일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n\n"
+        msg += f"🎓 **주간 일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n\n"
 
     if routine_plans:
-        msg += "🔄 **[매일 루틴 항목별 달성 현황]**\n"
+        msg += "🐦‍⬛ **[까마귀 루틴 항목별 달성 현황]**\n"
         routine_names = list(dict.fromkeys([p["task"] for p in routine_plans]))
         
         for task_name in routine_names:
@@ -1083,7 +1089,7 @@ def build_weekly_view(key):
                 1 for p in routine_plans if p["task"] == task_name and p["done"]
             )
             if completed_count >= 7:
-                msg += f"• **{task_name}:** `{completed_count}/7 - (달성!)` 🌿\n"
+                msg += f"• **{task_name}:** `{completed_count}/7` - (수확!) 🍋\n"
             else:
                 msg += f"• **{task_name}:** `{completed_count}/7` 완료\n"
         msg += "\n"
@@ -1116,14 +1122,14 @@ def build_weekly_view(key):
     completed_books_b = get_completed_books_count_reading(current_ch_idx)
     overall_rate_b = (completed_books_b / 66.0) * 100
     current_label_b = get_bible_label(current_ch_idx, chunk_size) if current_ch_idx < len(ALL_BIBLE_CHAPTERS) else "완독 완료!"
-    msg += f"• **성경 읽기 통산 달성률:** `{overall_rate_b:.1f}%` ({completed_books_b}/66 권 완독) - `{current_label_b}`\n\n"
+    msg += f"📖 **성경 읽기 통산 달성률:** `{overall_rate_b:.1f}%` ({completed_books_b}/66 권 완독) - `{current_label_b}`\n\n"
 
     current_v_idx = data.get("transcription_v_idx", 0)
     t_chunk_size = data.get("transcription_chunk", 10)
     completed_books_t = get_completed_books_count_transcription(current_v_idx)
     overall_rate_t = (completed_books_t / 66.0) * 100
     current_label_t = get_transcription_label(current_v_idx, t_chunk_size) if current_v_idx < len(ALL_BIBLE_VERSES) else "필사 완료!"
-    msg += f"• **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필) - `{current_label_t}`\n\n"
+    msg += f"✍️ **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필) - `{current_label_t}`\n\n"
 
     keyboard = []
 
@@ -1134,16 +1140,26 @@ def build_weekly_view(key):
         for p in uncompleted:
             cat = p.get("category", "")
             if cat and cat != current_cat:
-                msg += f"\n📂 **{cat}**\n"
-                keyboard.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                if cat == "[매일]":
+                    cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                elif "요일" in cat:
+                    cat_disp = "📅 [요일별 수확 과제]"
+                else:
+                    cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
+                    
+                msg += f"\n{cat_disp}\n"
+                keyboard.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
                 current_cat = cat
 
             date_str = f" ({p['date']})" if "date" in p else ""
 
+            is_routine = "[매일]" in cat
             if p.get("is_bible"):
                 icon = "🪺"
             elif p.get("is_transcription"):
                 icon = "☕️"
+            elif is_routine:
+                icon = "🌱"
             else:
                 icon = "🥚"
 
@@ -1327,7 +1343,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (chat_id, thread_id)
     data = query.data
 
-    # 🍂 [삭제] 버튼 클릭 시 (즉시 화면 및 DB에서 제거)
     if data.startswith("delete_item_"):
         idx = int(data.split("_")[2])
         topic_data = topic_plans.get(key, {})
@@ -1336,7 +1351,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 0 <= idx < len(plans):
             deleted_item = plans.pop(idx)
             save_data_to_supabase(key, topic_plans[key])
-            await query.answer(f"🍂 '{deleted_item['task']}' 항목이 삭제되었습니다.")
+            await query.answer(f"➖ '{deleted_item['task']}' 항목이 삭제되었습니다.")
 
             now_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%H:%M")
             plans = topic_data.get("plans", [])
@@ -1344,6 +1359,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
             routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
             bible_plans = [p for p in plans if p.get("is_bible") == True]
+            transcription_plans = [p for p in plans if p.get("is_transcription") == True]
 
             n_completed = sum(1 for p in normal_plans if p["done"])
             n_total = len(normal_plans)
@@ -1351,40 +1367,54 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             r_completed = sum(1 for p in routine_plans if p["done"])
             r_total = len(routine_plans)
+            r_rate = (r_completed / r_total) * 100 if r_total > 0 else 0.0
 
-            b_str = "완료 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+            b_str = "완성 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+            bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '') if bible_plans else "미설정"
+            
+            t_str = "한 후 🍪" if (transcription_plans and transcription_plans[0]["done"]) else "하는 중 ☕️"
+            trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '') if transcription_plans else "미설정"
 
             uncompleted_with_index = [(i, p) for i, p in enumerate(plans) if not p["done"]]
             
             msg = (
-                f"🌙 **[오늘의 공부 점검 알림 - {now_str}]**\n\n"
-                f"오늘 계획하신 공부 및 성경 묵상은 차근차근 진행하고 계신가요?\n"
+                f"🌙 **[야간 정원 점검 - {now_str}]**\n\n"
+                f"오늘 심은 씨앗들이 잘 자라고 있는지 둘러볼 시간입니다!\n"
                 f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
-                f"📊 **오늘의 달성 현황:**\n"
-                f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
-                f"• **매일 루틴 달성:** `{r_completed}/{r_total}`\n"
-                f"• **오늘의 성경 묵상:** `{b_str}`\n\n"
+                f"📊 **오늘의 정원 수확 현황:**\n"
+                f"🎓 **일반 공부:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
+                f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확! ☁️)\n"
+                f"📖 **성경 묵상:** {bible_task_name} (`{b_str}`)\n"
+                f"✍️ **성경 필사:** {trans_task_name} (`{t_str}`)\n\n"
                 f"📂 **[오늘의 남은 할 일]**\n"
             )
 
             keyboard = []
             if uncompleted_with_index:
-                msg += "📋 버튼을 눌러 완료 처리하거나 🍂 삭제할 수 있습니다."
+                msg += "📋 버튼을 눌러 완료 처리하거나 ➖ 삭제할 수 있습니다."
                 last_cat = None
                 for real_idx, item in uncompleted_with_index:
                     cat = item.get("category", "")
                     if cat and cat != last_cat:
-                        keyboard.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                        if cat == "[매일]":
+                            cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                        elif "요일" in cat:
+                            cat_disp = "📅 [요일별 수확 과제]"
+                        else:
+                            cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
+                        keyboard.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
                         last_cat = cat
 
+                    is_routine = "[매일]" in cat
                     if item.get("is_bible"):
                         status_icon = "🪺"
                     elif item.get("is_transcription"):
                         status_icon = "☕️"
+                    elif is_routine:
+                        status_icon = "🌱"
                     else:
                         status_icon = "🥚"
 
-                    is_routine = "[매일]" in cat
                     is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
                     if is_special:
@@ -1394,7 +1424,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         keyboard.append([
                             InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
-                            InlineKeyboardButton("🍂 삭제", callback_data=f"delete_item_{real_idx}")
+                            InlineKeyboardButton("➖ 삭제", callback_data=f"delete_item_{real_idx}")
                         ])
             else:
                 msg += "🌿 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
@@ -1414,7 +1444,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible") or p.get("is_transcription")]
                 save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text("🍂 **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
+            await query.edit_message_text("➖ **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
         elif data == "weekly_opt_rollover":
             await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
         return
@@ -1470,23 +1500,22 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" in p.get("category", "")]
                 save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text("🍂 **일반 할 일만 초기화되었습니다.**", parse_mode="Markdown")
+            await query.edit_message_text("➖ **일반 할 일만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_routines":
             if key in topic_plans:
                 plans = topic_plans[key].get("plans", [])
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
                 save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text("🍂 **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
+            await query.edit_message_text("➖ **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_all":
             if key in topic_plans:
                 topic_plans[key]["plans"] = []
                 save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text("🍂 **모든 공부 계획과 루틴이 초기화되었습니다.**", parse_mode="Markdown")
+            await query.edit_message_text("➖ **모든 공부 계획과 루틴이 초기화되었습니다.**", parse_mode="Markdown")
         elif data == "reset_cancel":
             await query.edit_message_text("🌧️ 초기화가 취소되었습니다.")
         return
 
-    # 🎯 1초 애니메이션 / 섹션 마지막 항목 잔상 유지 / 성경 제자리 리뉴얼 토글 핸들러
     if data.startswith("toggle_"):
         idx = int(data.split("_")[1])
         topic_data = topic_plans.get(key, {})
@@ -1498,18 +1527,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_item["done"] = not was_done
             save_data_to_supabase(key, topic_plans[key])
 
-            # 🎯 팝업 메시지 (10% 확률)
             if target_item["done"] and random.random() < 0.10:
                 cheer_pop = random.choice([
-                    "🌿 한 걸음 더 성장하셨네요! 수고하셨어요!",
-                    "🧊 영생은 습관 만들기에 달려있다.",
-                    "☁️ 사람이 아무것도 모른다고 해도, 해내려는 마음으로 노력하면 하늘이 도우신다.",
-                    "🍉 천국 성도가 되려면 나태하면 안되고 부지런해야 한다.",
-                    "🌿 성경은 우리의 희망이고, 우리의 생명이고, 우리의 스승이다.",
-                    "🎓 자신이 말씀을 좀 안다고 해서 안일하고 교만하면 안 된다.",
-                    "✨ 완벽해요! 이대로 계속 달려봐요!",
-                    "🍃 멋져요! 집중력이 대단하시네요!",
-                    "👏🏻 깔끔하게 하나 해결! 최고예요!",
+                    "🎓 구름 위를 날아오르듯 학식과 지혜가 더욱 깊어졌어요!",
+                    "🐦‍⬛ 까마귀가 높은 하늘에서 멋지게 날개를 펼쳤습니다!",
+                    "🍋 오늘도 싱싱한 루틴 하나를 수확했습니다!",
+                    "🪺 둥지 속 말씀이 단단한 양식이 되어가고 있어요.",
+                    "☁️ 자연 속 정원이 한층 더 풍성해졌네요!"
                 ])
                 await query.answer(cheer_pop, show_alert=False)
             else:
@@ -1518,7 +1542,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_bible_task = target_item.get("is_bible", False)
             is_trans_task = target_item.get("is_transcription", False)
 
-            # 완독/완필 축하 메시지
             if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = topic_data.get("bible_chunk", 4)
@@ -1575,8 +1598,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             original_text = query.message.text or ""
             
-            # 저녁 점검 알림 메시지인 경우
-            if "오늘의 공부 점검 알림" in original_text:
+            if "야간 정원 점검" in original_text:
                 plans = topic_data.get("plans", [])
                 uncompleted_with_index = [(i, p) for i, p in enumerate(plans) if not p["done"]]
                 
@@ -1584,44 +1606,59 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
                 routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
                 bible_plans = [p for p in plans if p.get("is_bible") == True]
+                transcription_plans = [p for p in plans if p.get("is_transcription") == True]
 
                 n_completed = sum(1 for p in normal_plans if p["done"])
                 n_total = len(normal_plans)
                 n_rate = (n_completed / n_total) * 100 if n_total > 0 else 0.0
                 r_completed = sum(1 for p in routine_plans if p["done"])
                 r_total = len(routine_plans)
-                b_str = "완료 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+                r_rate = (r_completed / r_total) * 100 if r_total > 0 else 0.0
+
+                b_str = "완성 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+                bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '') if bible_plans else "미설정"
+                
+                t_str = "한 후 🍪" if (transcription_plans and transcription_plans[0]["done"]) else "하는 중 ☕️"
+                trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '') if transcription_plans else "미설정"
 
                 msg = (
-                    f"🌙 **[오늘의 공부 점검 알림 - {now_str}]**\n\n"
-                    f"오늘 계획하신 공부 및 성경 묵상은 차근차근 진행하고 계신가요?\n"
+                    f"🌙 **[야간 정원 점검 - {now_str}]**\n\n"
+                    f"오늘 심은 씨앗들이 잘 자라고 있는지 둘러볼 시간입니다!\n"
                     f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
-                    f"📊 **오늘의 달성 현황:**\n"
-                    f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
-                    f"• **매일 루틴 달성:** `{r_completed}/{r_total}`\n"
-                    f"• **오늘의 성경 묵상:** `{b_str}`\n\n"
+                    f"📊 **오늘의 정원 수확 현황:**\n"
+                    f"🎓 **일반 공부:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
+                    f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확! ☁️)\n"
+                    f"📖 **성경 묵상:** {bible_task_name} (`{b_str}`)\n"
+                    f"✍️ **성경 필사:** {trans_task_name} (`{t_str}`)\n\n"
                     f"📂 **[오늘의 남은 할 일]**\n"
                 )
 
-                # 🎬 [1단계] 즉시 까마귀 변경 상태 유지
                 keyboard_instant = []
                 if uncompleted_with_index:
-                    msg += "📋 버튼을 눌러 완료 처리하거나 🍂 삭제할 수 있습니다."
+                    msg += "📋 버튼을 눌러 완료 처리하거나 ➖ 삭제할 수 있습니다."
                     last_cat = None
                     for real_idx, item in uncompleted_with_index:
                         cat = item.get("category", "")
                         if cat and cat != last_cat:
-                            keyboard_instant.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                            if cat == "[매일]":
+                                cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                            elif "요일" in cat:
+                                cat_disp = "📅 [요일별 수확 과제]"
+                            else:
+                                cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
+                            keyboard_instant.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
                             last_cat = cat
 
+                        is_routine = "[매일]" in cat
                         if item.get("is_bible"):
                             status_icon = "📖" if item["done"] else "🪺"
                         elif item.get("is_transcription"):
                             status_icon = "🍪" if item["done"] else "☕️"
+                        elif is_routine:
+                            status_icon = "🍋" if item["done"] else "🌱"
                         else:
-                            status_icon = "🐦‍⬛" if item["done"] else "🥚"
+                            status_icon = "🎓" if item["done"] else "🥚"
 
-                        is_routine = "[매일]" in cat
                         is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
                         if item["done"] or is_special:
@@ -1631,10 +1668,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             keyboard_instant.append([
                                 InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
-                                InlineKeyboardButton("🍂 삭제", callback_data=f"delete_item_{real_idx}")
+                                InlineKeyboardButton("➖ 삭제", callback_data=f"delete_item_{real_idx}")
                             ])
                 else:
-                    msg += "🌿 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+                    msg += "🌾 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ☁️"
 
                 reply_markup_instant = InlineKeyboardMarkup(keyboard_instant) if keyboard_instant else None
                 try:
@@ -1643,7 +1680,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"알림 수정 예외: {e}")
 
-                # 🎬 [2단계] 1초 대기
                 await asyncio.sleep(1)
 
                 if is_bible_task and target_item["done"]:
@@ -1670,39 +1706,47 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["transcription_v_idx"] = next_v_idx
                     save_data_to_supabase(key, topic_plans[key])
 
-                # 🎬 [3단계] 1초 후 완료 항목 정돈 및 성경/필사 리뉴얼
                 plans = topic_data.get("plans", [])
                 uncompleted_final = [(i, p) for i, p in enumerate(plans) if not p["done"]]
                 
                 msg_final = (
-                    f"🌙 **[오늘의 공부 점검 알림 - {now_str}]**\n\n"
-                    f"오늘 계획하신 공부 및 성경 묵상은 차근차근 진행하고 계신가요?\n"
+                    f"🌙 **[야간 정원 점검 - {now_str}]**\n\n"
+                    f"오늘 심은 씨앗들이 잘 자라고 있는지 둘러볼 시간입니다!\n"
                     f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
-                    f"📊 **오늘의 달성 현황:**\n"
-                    f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
-                    f"• **매일 루틴 달성:** `{r_completed}/{r_total}`\n"
-                    f"• **오늘의 성경 묵상:** `{b_str}`\n\n"
+                    f"📊 **오늘의 정원 수확 현황:**\n"
+                    f"🎓 **일반 공부:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
+                    f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확! ☁️)\n"
+                    f"📖 **성경 묵상:** {bible_task_name} (`{b_str}`)\n"
+                    f"✍️ **성경 필사:** {trans_task_name} (`{t_str}`)\n\n"
                     f"📂 **[오늘의 남은 할 일]**\n"
                 )
 
                 keyboard_final = []
                 if uncompleted_final:
-                    msg_final += "📋 버튼을 눌러 완료 처리하거나 🍂 삭제할 수 있습니다."
+                    msg_final += "📋 버튼을 눌러 완료 처리하거나 ➖ 삭제할 수 있습니다."
                     last_cat = None
                     for real_idx, item in uncompleted_final:
                         cat = item.get("category", "")
                         if cat and cat != last_cat:
-                            keyboard_final.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                            if cat == "[매일]":
+                                cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                            elif "요일" in cat:
+                                cat_disp = "📅 [요일별 수확 과제]"
+                            else:
+                                cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
+                            keyboard_final.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
                             last_cat = cat
 
+                        is_routine = "[매일]" in cat
                         if item.get("is_bible"):
                             status_icon = "🪺"
                         elif item.get("is_transcription"):
                             status_icon = "☕️"
+                        elif is_routine:
+                            status_icon = "🌱"
                         else:
                             status_icon = "🥚"
 
-                        is_routine = "[매일]" in cat
                         is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
                         if is_special:
@@ -1712,10 +1756,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             keyboard_final.append([
                                 InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
-                                InlineKeyboardButton("🍂 삭제", callback_data=f"delete_item_{real_idx}")
+                                InlineKeyboardButton("➖ 삭제", callback_data=f"delete_item_{real_idx}")
                             ])
                 else:
-                    msg_final += "🌿 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+                    msg_final += "🌾 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ☁️"
 
                 reply_markup_final = InlineKeyboardMarkup(keyboard_final) if keyboard_final else None
                 try:
@@ -1732,7 +1776,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
             else:
-                # 일반 `/l` (오늘의 할 일) 화면에서의 잔상 유지 애니메이션
                 current_visible_indices = set()
                 if query.message.reply_markup and query.message.reply_markup.inline_keyboard:
                     for row in query.message.reply_markup.inline_keyboard:
@@ -1747,7 +1790,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not current_visible_indices:
                     current_visible_indices = None
 
-                # 🎬 [1단계] 까마귀로 즉시 변경하여 클릭 항목 잔상 강제 유지
                 text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1759,10 +1801,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if "Message is not modified" not in str(e):
                         print(f"메시지 수정 예외: {e}")
 
-                # 🎬 [2단계] 1초간 까마귀 유지
                 await asyncio.sleep(1)
 
-                # 🎬 [3단계] 성경/필사의 경우 글자 리뉴얼 및 상태 미완료로 재설정
                 if is_bible_task and target_item["done"]:
                     curr_ch_idx = target_item.get("bible_ch_idx", 0)
                     chunk_size = topic_data.get("bible_chunk", 4)
@@ -1787,7 +1827,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     target_item["transcription_v_idx"] = next_v_idx
                     save_data_to_supabase(key, topic_plans[key])
 
-                # 🎬 [4단계] 1초 후 최종 화면 전환 (완료된 일반 항목 정리 및 성경/필사 새 분량 표시)
                 text_final, reply_markup_final = build_plan_view(key)
                 if "-------------------------" in original_text:
                     header = original_text.split("-------------------------")[0]
@@ -1811,10 +1850,10 @@ async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📋 일반 할 일만 초기화", callback_data="reset_tasks")],
         [InlineKeyboardButton("🔄 [매일] 루틴만 초기화", callback_data="reset_routines")],
-        [InlineKeyboardButton("🍂 전체 초기화", callback_data="reset_all")],
+        [InlineKeyboardButton("➖ 전체 초기화", callback_data="reset_all")],
         [InlineKeyboardButton("🌧️ 취소", callback_data="reset_cancel")],
     ]
-    await update.message.reply_text("🍂 **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await update.message.reply_text("➖ **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1824,8 +1863,8 @@ async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
         plan_text, reply_markup = build_plan_view(key)
         
         msg = (
-            "☀️ **[좋은 아침입니다! 오늘 하루도 힘차게 시작해 봐요!]**\n\n"
-            "오늘 달성할 공부 계획이나 할 일을 채팅창에 입력해 보세요!\n\n"
+            "☀️ **[오늘의 씨앗 뿌리기]**\n\n"
+            "정원에 새싹을 심을 준비가 되셨나요? 오늘 달성할 계획을 입력해 보세요!\n\n"
             "-------------------------\n"
             f"{plan_text}"
         )
@@ -1854,6 +1893,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
             routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
             bible_plans = [p for p in plans if p.get("is_bible") == True]
+            transcription_plans = [p for p in plans if p.get("is_transcription") == True]
 
             n_completed = sum(1 for p in normal_plans if p["done"])
             n_total = len(normal_plans)
@@ -1861,42 +1901,55 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
 
             r_completed = sum(1 for p in routine_plans if p["done"])
             r_total = len(routine_plans)
+            r_rate = (r_completed / r_total) * 100 if r_total > 0 else 0.0
 
-            b_str = "완료 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+            b_str = "완성 📖" if (bible_plans and bible_plans[0]["done"]) else "진행 중 🪺"
+            bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '') if bible_plans else "미설정"
+            
+            t_str = "한 후 🍪" if (transcription_plans and transcription_plans[0]["done"]) else "하는 중 ☕️"
+            trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '') if transcription_plans else "미설정"
 
             uncompleted_with_index = [(i, p) for i, p in enumerate(plans) if not p["done"]]
             
             msg = (
-                f"🌙 **[오늘의 공부 점검 알림 - {now_str}]**\n\n"
-                f"오늘 계획하신 공부 및 성경 묵상은 차근차근 진행하고 계신가요?\n"
+                f"🌙 **[야간 정원 점검 - {now_str}]**\n\n"
+                f"오늘 심은 씨앗들이 잘 자라고 있는지 둘러볼 시간입니다!\n"
                 f"잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
-                f"📊 **오늘의 달성 현황:**\n"
-                f"• **일반 공부 달성률:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
-                f"• **매일 루틴 달성:** `{r_completed}/{r_total}`\n"
-                f"• **오늘의 성경 묵상:** `{b_str}`\n\n"
+                f"📊 **오늘의 정원 수확 현황:**\n"
+                f"🎓 **일반 공부:** `{n_rate:.1f}%` ({n_completed}/{n_total} 완료)\n"
+                f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total} 수확! ☁️)\n"
+                f"📖 **성경 묵상:** {bible_task_name} (`{b_str}`)\n"
+                f"✍️ **성경 필사:** {trans_task_name} (`{t_str}`)\n\n"
                 f"📂 **[오늘의 남은 할 일]**\n"
             )
 
             keyboard = []
             if uncompleted_with_index:
-                msg += "📋 버튼을 눌러 완료 처리하거나 🍂 삭제할 수 있습니다."
+                msg += "📋 버튼을 눌러 완료 처리하거나 ➖ 삭제할 수 있습니다."
                 
                 last_cat = None
                 for real_idx, item in uncompleted_with_index:
                     cat = item.get("category", "")
                     if cat and cat != last_cat:
-                        keyboard.append([InlineKeyboardButton(f"📂 {cat}", callback_data="noop")])
+                        if cat == "[매일]":
+                            cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
+                        elif "요일" in cat:
+                            cat_disp = "📅 [요일별 수확 과제]"
+                        else:
+                            cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
+                        keyboard.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
                         last_cat = cat
 
+                    is_routine = "[매일]" in cat
                     if item.get("is_bible"):
                         status_icon = "🪺"
                     elif item.get("is_transcription"):
                         status_icon = "☕️"
+                    elif is_routine:
+                        status_icon = "🌱"
                     else:
                         status_icon = "🥚"
 
-                    # 알림 발송 시 루틴, 성경, 필사는 삭제 버튼 제외
-                    is_routine = "[매일]" in cat
                     is_special = item.get("is_bible") or item.get("is_transcription") or is_routine
 
                     if is_special:
@@ -1906,10 +1959,10 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                     else:
                         keyboard.append([
                             InlineKeyboardButton(f"{status_icon} {item['task']}", callback_data=f"toggle_{real_idx}"),
-                            InlineKeyboardButton("🍂 삭제", callback_data=f"delete_item_{real_idx}")
+                            InlineKeyboardButton("➖ 삭제", callback_data=f"delete_item_{real_idx}")
                         ])
             else:
-                msg += "🌿 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ✨"
+                msg += "🌾 오늘 등록된 모든 공부/성경 묵상을 완료하셨습니다! 수고 많으셨습니다! ☁️"
 
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
@@ -1943,7 +1996,7 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
         if uncompleted_count > 0:
             msg += "\n\n💡 **이번 주 미완료 항목 처리 방법을 선택해 주세요:**"
             keyboard = [
-                [InlineKeyboardButton("🍂 이번 주 미완료 항목 삭제 (초기화)", callback_data="weekly_opt_clear")],
+                [InlineKeyboardButton("➖ 이번 주 미완료 항목 삭제 (초기화)", callback_data="weekly_opt_clear")],
                 [InlineKeyboardButton("➡️ 미완료 항목 다음 주로 이월", callback_data="weekly_opt_rollover")],
             ]
         
@@ -2060,7 +2113,6 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key]["weekly_tasks"] = {}
         save_data_to_supabase(key, topic_plans[key])
 
-# 🎯 그룹/토픽 방에서는 자동완성이 차단되도록 Scope 분리 적용
 async def post_init(application):
     load_data_from_supabase()
 
@@ -2071,10 +2123,10 @@ async def post_init(application):
         BotCommand("wt", "주간 요일별 과제 등록 (/weekly_task)"),
         BotCommand("bs", "성경 묵상 시작점 지정 (/bible_start)"),
         BotCommand("bp", "하루 읽을 성경 장수 설정 (/bible_pages)"),
-        BotCommand("st", "성경 66권 완독 현황판 보기 (/bible_status)"),
+        BotCommand("st", "성경 완독 현황판 보기 (/bible_status)"),
         BotCommand("ts", "성경 필사 시작점 지정 (/tr_start)"),
         BotCommand("tp", "하루 필사할 성경 절수 설정 (/tr_pages)"),
-        BotCommand("tst", "성경 66권 필사 현황판 보기 (/tr_status)"),
+        BotCommand("tst", "성경 필사 현황판 보기 (/tr_status)"),
         BotCommand("d", "할 일 삭제 (/del)"),
         BotCommand("t", "일일 점검 알림 시간 설정 (/time)"),
         BotCommand("e", "등록된 매일 루틴 수정 (/edit)"),
@@ -2084,10 +2136,8 @@ async def post_init(application):
         BotCommand("on", "이 토픽에서 봇 재활성화"),
     ]
 
-    # 1. 🎯 기본/그룹/토픽 방의 명령어 자동완성 삭제
     await application.bot.delete_my_commands()
 
-    # 2. 🎯 1:1 개인 대화방(Private Chats)에만 명령어 목록 등록
     try:
         await application.bot.set_my_commands(
             user_commands,
@@ -2096,7 +2146,6 @@ async def post_init(application):
     except Exception as e:
         print(f"개인방 명령어 메뉴 등록 실패: {e}")
 
-    # 3. 🎯 관리자(ADMIN_ID) 전용 채팅방 메뉴 등록
     admin_commands = user_commands + [
         BotCommand("re", "[관리자] 답변 전송 (/reply)"),
         BotCommand("bc", "[관리자] 공지 과제 발송 (/broadcast)"),
