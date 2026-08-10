@@ -122,9 +122,31 @@ for short_name, full_name, total_ch, verse_counts in BIBLE_STRUCTURE:
             ALL_BIBLE_VERSES.append((short_name, ch_num, v_num))
 
 # ---------------------------------------------------------
-# 💾 Supabase 연동 HELPER 함수
+# 💾 Supabase 연동 HELPER 함수 및 새벽 5시 기준 날짜 함수
 # ---------------------------------------------------------
 topic_plans = {}
+
+def get_logical_now():
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    if now.hour < 5:
+        now = now - datetime.timedelta(days=1)
+    return now
+
+def get_korean_date_str():
+    now = get_logical_now()
+    weekday_str = WEEKDAY_KOR[now.weekday()]
+    return now.strftime(f"%m월 %d일 ({weekday_str})")
+
+def get_korean_week_range_str():
+    now = get_logical_now()
+    # 일요일을 한 주의 시작(0)으로 맞춤
+    idx = now.weekday()
+    sun = now - datetime.timedelta(days=(idx + 1) % 7)
+    sat = sun + datetime.timedelta(days=6)
+    
+    sun_str = f"{sun.strftime('%m월 %d일')} (일)"
+    sat_str = f"{sat.strftime('%m월 %d일')} (토)"
+    return f"{sun_str} ~ {sat_str}"
 
 def save_data_to_supabase(key, data):
     if not supabase_client:
@@ -319,22 +341,6 @@ def get_topic_key(update: Update):
         else 0
     )
     return (chat_id, thread_id)
-
-def get_korean_date_str():
-    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
-    weekday_str = WEEKDAY_KOR[now.weekday()]
-    return now.strftime(f"%m월 %d일 ({weekday_str})")
-
-def get_korean_week_range_str():
-    tz = pytz.timezone("Asia/Seoul")
-    now = datetime.datetime.now(tz)
-    idx = (now.weekday() + 1) % 7
-    sun = now - datetime.timedelta(days=idx)
-    sat = sun + datetime.timedelta(days=6)
-    
-    sun_str = f"{sun.strftime('%m월 %d일')} (일)"
-    sat_str = f"{sat.strftime('%m월 %d일')} (토)"
-    return f"{sun_str} ~ {sat_str}"
 
 def default_topic_data(user_name):
     return {
@@ -643,7 +649,7 @@ async def set_notify_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_weekly_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
-    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    now = get_logical_now()
     today_str = now.strftime("%m/%d")
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
 
@@ -756,7 +762,7 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chunk_size = topic_plans[key].get("bible_chunk", 4)
     target_label = get_bible_label(matched_ch_idx, chunk_size)
-    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+    today_str = get_logical_now().strftime("%m/%d")
 
     plans = topic_plans[key].get("plans", [])
     topic_plans[key]["plans"] = [p for p in plans if p.get("is_bible") != True]
@@ -840,7 +846,7 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     chunk_size = topic_plans[key].get("transcription_chunk", 10)
     target_label = get_transcription_label(matched_v_idx, chunk_size)
-    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+    today_str = get_logical_now().strftime("%m/%d")
 
     plans = topic_plans[key].get("plans", [])
     topic_plans[key]["plans"] = [p for p in plans if p.get("is_transcription") != True]
@@ -957,20 +963,20 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
     plans = data.get("plans", [])
     ddays = data.get("ddays", {})
     task_pool = data.get("task_pool", [])
-    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+    today_str = get_logical_now().strftime("%m/%d")
 
     # [D-Day 계산 및 요약]
     dday_summary = ""
     if ddays:
         tz = pytz.timezone("Asia/Seoul")
-        now_date = datetime.datetime.now(tz).date()
+        now_date = get_logical_now().date()
         for cat, date_str in ddays.items():
             try:
                 target_date = datetime.datetime.strptime(date_str, "%y/%m/%d").date()
                 days_left = (target_date - now_date).days
                 
                 pool_count = sum(1 for p in task_pool if p["category"] == cat)
-                plans_count = sum(1 for p in plans if p.get("category") == cat and not p.get("done"))
+                plans_count = sum(1 for p in plans if p.get("category"] == cat and not p.get("done"))
                 total_left = pool_count + plans_count
                 
                 if total_left == 0: continue
@@ -994,7 +1000,6 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             None,
         )
 
-    # 이월된 항목이 야간 점검에서 클릭되어 1초간 보이도록 하는 강제 통과 로직 포함
     today_plans_with_index = [
         (idx, p) for idx, p in enumerate(plans)
         if p.get("date") == today_str or not p.get("done") or (visible_indices is not None and idx in visible_indices)
@@ -1331,7 +1336,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     chat_id, thread_id = key
     text = update.message.text.strip()
-    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+    today_str = get_logical_now().strftime("%m/%d")
 
     if text.startswith("/"):
         return
@@ -1403,7 +1408,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     user_name = update.effective_user.first_name or "사용자"
-    today_str = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+    today_str = get_logical_now().strftime("%m/%d")
 
     if update.message.text:
         lines = update.message.text.split("\n")
@@ -1529,7 +1534,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 0 <= idx < len(pool):
             task = pool.pop(idx)
             task["done"] = False
-            task["date"] = datetime.datetime.now(pytz.timezone("Asia/Seoul")).strftime("%m/%d")
+            task["date"] = get_logical_now().strftime("%m/%d")
             task["delay_count"] = 0
             plans.append(task)
             save_data_to_supabase(key, topic_plans[key])
@@ -1653,6 +1658,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_item = plans[idx]
             was_done = target_item["done"]
             target_item["done"] = not was_done
+            
+            if target_item["done"]:
+                target_item["date"] = get_logical_now().strftime("%m/%d")
+
             save_data_to_supabase(key, topic_plans[key])
 
             if target_item["done"] and random.random() < 0.10:
@@ -1738,7 +1747,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             except ValueError:
                                 pass
 
-            # 방금 클릭한 항목을 1초 동안 보여주기 위해 강제로 추가
             current_visible_indices.add(idx)
 
             text_instant, reply_markup_instant = build_plan_view(key, visible_indices=current_visible_indices, is_night_mode=is_night_mode)
@@ -1777,7 +1785,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_item["transcription_v_idx"] = next_v_idx
                 save_data_to_supabase(key, topic_plans[key])
 
-            # 1초 뒤 UI 원상복구를 위해 None을 전달하여 자연스러운 렌더링(항목 및 섹션 숨김) 유도
             text_final, reply_markup_final = build_plan_view(key, visible_indices=None, is_night_mode=is_night_mode)
             if "-------------------------" in original_text:
                 header = original_text.split("-------------------------")[0]
@@ -1789,7 +1796,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 # ---------------------------------------------------------
-# 스케줄러 Jobs
+# 스케줄러 Jobs (일요일 새벽 5시 주간 정산 적용)
 # ---------------------------------------------------------
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1848,7 +1855,7 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 pass
 
-async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
+async def sunday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
         if data.get("disabled", False):
             continue
@@ -1859,7 +1866,7 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
         uncompleted_count = sum(1 for p in plans if not p["done"] and not p.get("is_bible") and not p.get("is_transcription"))
 
         msg = (
-            "🍃 **[토요일 주간 정산 및 점검 리포트]**\n\n"
+            "🍃 **[일요일 주간 정산 및 점검 리포트]**\n\n"
             + weekly_text
         )
 
@@ -1891,7 +1898,7 @@ async def saturday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
             pass
 
 async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
-    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    now = get_logical_now()
     today_str = now.strftime("%m/%d")
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
     
@@ -2115,12 +2122,11 @@ if __name__ == "__main__":
 
     reset_time = datetime.time(hour=5, minute=0, second=0, tzinfo=tz)
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
-    sat_time = datetime.time(hour=21, minute=0, second=0, tzinfo=tz)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
-    job_queue.run_daily(saturday_weekly_reminder, time=sat_time, days=(6,))
+    job_queue.run_daily(sunday_weekly_reminder, time=reset_time, days=(6,)) # 토요일 자정(일요일 새벽 5시)에 주간 리포트 발송
     job_queue.run_daily(daily_routine_reset_job, time=reset_time)
-    job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(0,))
+    job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(6,)) # 일요일 새벽 5시에 미완료 항목 이월/정리
     
     job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
 
