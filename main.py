@@ -994,9 +994,10 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             None,
         )
 
+    # 이월된 항목이 야간 점검에서 클릭되어 1초간 보이도록 하는 강제 통과 로직 포함
     today_plans_with_index = [
         (idx, p) for idx, p in enumerate(plans)
-        if p.get("date") == today_str or not p.get("done")
+        if p.get("date") == today_str or not p.get("done") or (visible_indices is not None and idx in visible_indices)
     ]
     
     seen_tasks = set()
@@ -1776,12 +1777,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_item["transcription_v_idx"] = next_v_idx
                 save_data_to_supabase(key, topic_plans[key])
 
-            # 1초 뒤 클릭한 항목을 visible_indices에서 제거하여 (완료된 경우) 렌더링에서 자연스럽게 사라지도록 처리
-            current_visible_indices.discard(idx)
-            if not current_visible_indices:
-                current_visible_indices = None
-
-            text_final, reply_markup_final = build_plan_view(key, visible_indices=current_visible_indices, is_night_mode=is_night_mode)
+            # 1초 뒤 UI 원상복구를 위해 None을 전달하여 자연스러운 렌더링(항목 및 섹션 숨김) 유도
+            text_final, reply_markup_final = build_plan_view(key, visible_indices=None, is_night_mode=is_night_mode)
             if "-------------------------" in original_text:
                 header = original_text.split("-------------------------")[0]
                 text_final = f"{header}-------------------------\n{text_final}"
