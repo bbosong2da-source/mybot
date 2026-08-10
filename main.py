@@ -295,7 +295,7 @@ WELCOME_MESSAGES = [
     "• **마스터 태스크 풀:** `/p [카테고리] 할일`\n"
     "• **태스크 풀 인양:** `/pk`\n"
     "• **D-Day 설정:** `/dd [카테고리] YY/MM/DD`\n"
-    "• **할 일 삭제:** `/d [번호] [취소사유]`\n"
+    "• **할 일 삭제:** `/d [정확한 할일 명], [취소사유]`\n"
     "• **성경 하루 분량:** `/bp [장수]`\n"
     "• **성경 시작점:** `/bs [분량]`\n"
     "• **성경 완독 현황판:** `/st`\n"
@@ -880,7 +880,7 @@ async def transcription_status(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 삭제 시 사유 강제 작성 로직 (Feature 2)
+# 삭제 시 사유 강제 작성 로직 (형식: /d [정확한 할일 명], [취소사유])
 # ---------------------------------------------------------
 async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -890,10 +890,12 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_content = update.message.text.strip()
     raw_input = re.sub(r"^/(delete|del|d)\s*", "", text_content, flags=re.IGNORECASE).strip()
 
-    if not raw_input:
+    if not raw_input or "," not in raw_input:
         await update.message.reply_text(
-            "💡 **형식:** `/d [번호/이름] [취소사유 10자 이상]`\n"
-            "예: `/d 1 관련 계획이 완전히 변경됨`", 
+            "💡 **[삭제 명령어 형식 안내]**\n\n"
+            "`/d [정확한 할일 명], [취소사유 10자 이상]`\n\n"
+            "**작성 예시:**\n"
+            "`/d 오케스트라 총보 리딩, 자료 부족으로 인한 일시 보류`", 
             parse_mode="Markdown"
         )
         return
@@ -902,43 +904,39 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🍃 삭제할 할 일이 없습니다.")
         return
 
-    parts = raw_input.split(maxsplit=1)
+    parts = raw_input.split(",", 1)
+    target_task_name = parts[0].strip()
+    reason = parts[1].strip() if len(parts) > 1 else ""
+
     target_idx = -1
-    
-    if parts[0].isdigit():
-        idx = int(parts[0]) - 1
-        if 0 <= idx < len(plans):
-            target_idx = idx
-    else:
-        for i, p in enumerate(plans):
-            if parts[0].lower() in p["task"].lower():
-                target_idx = i
-                break
+    for i, p in enumerate(plans):
+        if p["task"].strip() == target_task_name:
+            target_idx = i
+            break
 
     if target_idx == -1:
-        await update.message.reply_text(f"🌧️ `{parts[0]}`에 해당하는 할 일을 찾을 수 없습니다.")
+        await update.message.reply_text(f"🌧️ `{target_task_name}`과(와) 정확히 일치하는 할 일을 찾을 수 없습니다.\n(띄어쓰기와 글자를 확인해 주세요!)")
         return
 
     target = plans[target_idx]
     is_routine = "[매일]" in target.get("category", "") or target.get("is_bible") or target.get("is_transcription")
     
     if not is_routine:
-        if len(parts) < 2 or len(parts[1].strip()) < 10:
+        if len(reason) < 10:
             await update.message.reply_text(
                 "🚨 **[삭제 거부]**\n"
-                "이미 활성화된 일반 과제를 임의로 삭제할 수 없습니다.\n"
-                "타당한 취소 사유(10자 이상)를 논리적으로 작성해야 삭제가 승인됩니다.\n\n"
-                "작성 예시: `/d 1 자료 부족으로 인한 일시 보류`", 
+                "이미 활성화된 일반 과제는 타당한 취소 사유(10자 이상)를 함께 작성해야 삭제가 승인됩니다.\n\n"
+                "**형식:** `/d [할일명], [취소사유 10자 이상]`", 
                 parse_mode="Markdown"
             )
             return
-        reason = parts[1].strip()
         ack = f"➖ 사유 승인됨: '{reason}'\n"
     else:
         ack = "➖ "
 
     deleted_item = plans.pop(target_idx)
     save_data_to_supabase(key, topic_plans[key])
+    
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
         f"{ack}**`{deleted_item['task']}` 항목이 삭제되었습니다.** (통계 분모에서 제외)\n\n"
@@ -1521,7 +1519,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data.startswith("del_alert_"):
-        await query.answer("이 할 일을 삭제하려면 채팅창에 /d [번호] [취소사유 10자 이상]을 입력해 주세요.", show_alert=True)
+        await query.answer("이 할 일을 삭제하려면 채팅창에 /d [할일명], [취소사유 10자 이상]을 입력해 주세요.", show_alert=True)
         return
 
     if data.startswith("pick_"):
@@ -1550,7 +1548,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_special = target.get("is_bible") or target.get("is_transcription") or "[매일]" in target.get("category", "")
             
             if not is_special:
-                await query.answer("🚨 일반 과제는 /d [번호] [취소사유 10자 이상] 명령어로만 삭제할 수 있습니다.", show_alert=True)
+                await query.answer("🚨 일반 과제는 /d [할일명], [취소사유 10자 이상] 명령어로만 삭제할 수 있습니다.", show_alert=True)
                 return
             
             deleted_item = plans.pop(idx)
@@ -2011,7 +2009,7 @@ async def post_init(application):
         BotCommand("dd", "디데이설정 (/dday)"),
         BotCommand("p", "풀에보관 (/pool)"),
         BotCommand("pk", "풀에서가져오기 (/pick)"),
-        BotCommand("d", "삭제(사유필수) (/del)"),
+        BotCommand("d", "삭제(할일명,사유) (/del)"),
         BotCommand("t", "알림시간설정 (/time)"),
         BotCommand("e", "루틴수정 (/edit)"),
         BotCommand("w", "주간리포트 (/weekly)"),
