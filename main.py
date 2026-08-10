@@ -231,7 +231,7 @@ def generate_bible_status_text(current_ch_idx):
 
 def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
-    msg = "✍️ **[성경 66권 필사 현황판]**\n"
+    msg = "✍🏻 **[성경 66권 필사 현황판]**\n"
     msg += "한 후: 🍪 | 하는중: ☕️ | 하기 전: 🧊\n\n"
     msg += "📘 **[구약 39권]**\n"
 
@@ -857,7 +857,7 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
-        f"✍️ **성경 필사 시작 지점이 설정되었습니다!**\n"
+        f"✍🏻 **성경 필사 시작 지점이 설정되었습니다!**\n"
         f"• 하루 설정 분량: **{chunk_size}절씩**\n"
         f"• 시작 분량: **{target_label}**\n\n"
         f"-------------------------\n"
@@ -1051,7 +1051,7 @@ def build_plan_view(key, visible_indices=None):
         t_completed = sum(1 for p in transcription_plans if p["done"])
         t_status_str = "한 후 🍪" if t_completed > 0 else "하는 중 ☕️"
         trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '')
-        stat_lines.append(f"✍️ **성경 필사:** {trans_task_name} (`{t_status_str}`)")
+        stat_lines.append(f"✍🏻 **성경 필사:** {trans_task_name} (`{t_status_str}`)")
 
     stat_str = "\n".join(stat_lines)
 
@@ -1190,7 +1190,7 @@ def build_weekly_view(key):
     completed_books_t = get_completed_books_count_transcription(current_v_idx)
     overall_rate_t = (completed_books_t / 66.0) * 100
     current_label_t = get_transcription_label(current_v_idx, t_chunk_size) if current_v_idx < len(ALL_BIBLE_VERSES) else "필사 완료!"
-    msg += f"✍️ **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필) - `{current_label_t}`\n\n"
+    msg += f"✍🏻 **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필) - `{current_label_t}`\n\n"
 
     keyboard = []
 
