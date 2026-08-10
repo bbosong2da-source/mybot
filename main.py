@@ -232,7 +232,7 @@ def generate_bible_status_text(current_ch_idx):
 def generate_transcription_status_text(current_v_idx):
     current_global_v_idx = 0
     msg = "✍🏻 **[성경 66권 필사 현황판]**\n"
-    msg += "한 후: 🍪 | 하는중: ☕️ | 하기 전: 🧊\n\n"
+    msg += "한 후: 🪽 | 하는중: ☕️ | 하기 전: 🗞\n\n"
     msg += "📘 **[구약 39권]**\n"
 
     for idx, (short_name, full_name, _, verse_counts) in enumerate(BIBLE_STRUCTURE):
@@ -245,11 +245,11 @@ def generate_transcription_status_text(current_v_idx):
             msg += "\n\n📕 **[신약 27권]**\n"
 
         if current_v_idx > book_end_v_idx:
-            status_icon = "🍪"
+            status_icon = "🪽"
         elif book_start_v_idx <= current_v_idx <= book_end_v_idx:
             status_icon = "☕️"
         else:
-            status_icon = "🧊"
+            status_icon = "🗞"
 
         msg += f"{status_icon} `{short_name}` "
 
@@ -1049,7 +1049,7 @@ def build_plan_view(key, visible_indices=None):
 
     if transcription_plans:
         t_completed = sum(1 for p in transcription_plans if p["done"])
-        t_status_str = "한 후 🍪" if t_completed > 0 else "하는 중 ☕️"
+        t_status_str = "한 후 🪽" if t_completed > 0 else "하는 중 ☕️"
         trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '')
         stat_lines.append(f"✍🏻 **성경 필사:** {trans_task_name} (`{t_status_str}`)")
 
@@ -1106,7 +1106,7 @@ def build_plan_view(key, visible_indices=None):
             if item.get("is_bible"):
                 status_icon = "📖" if item["done"] else "📜"
             elif item.get("is_transcription"):
-                status_icon = "🍪" if item["done"] else "☕️"
+                status_icon = "🪽" if item["done"] else "☕️"
             elif is_routine:
                 status_icon = "🍋" if item["done"] else "🌱"
             else:
@@ -1698,7 +1698,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     congrat_msg = (
                         f"🌱 **축하합니다! [{full_name}] 필사를 완필하셨습니다!** 👏🏻✨\n\n"
                         f"한 절 한 절 정성껏 남기신 노고에 박수를 보냅니다!\n"
-                        f"다음 권인 **[{next_full_name}]**도 힘차게 써나가 보세요! 🍪\n\n"
+                        f"다음 권인 **[{next_full_name}]**도 힘차게 써나가 보세요! 🪽\n\n"
                         f"-------------------------\n"
                         f"{t_status_board_text}"
                     )
