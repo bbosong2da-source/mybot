@@ -947,13 +947,25 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# UI 빌더 (Feature 1, Feature 3 연동 + 이모지 변경)
+# UI 빌더 (섹션 통합 기능 반영 및 이모지 변경)
 # ---------------------------------------------------------
 def get_category_priority(category_name):
     if category_name == "[매일]": return 1
     elif "요일 과제]" in category_name or "요일 할일]" in category_name: return 2
     elif category_name == "[일반]": return 99
     else: return 3
+
+def get_display_category(category_name):
+    """
+    카테고리 이름을 화면에 보여줄 통합된 섹션 제목으로 변환합니다.
+    요일별 과제들이 모두 하나의 섹션으로 묶이도록 처리합니다.
+    """
+    if category_name == "[매일]":
+        return "🐦‍⬛ [까마귀의 매일 루틴]"
+    elif "요일" in category_name:
+        return "📅 [요일별 수확 과제]"
+    else:
+        return f"☁️ {category_name.replace('[일반]', '[구름 언덕 공부방]')}"
 
 def build_plan_view(key, visible_indices=None, is_night_mode=False):
     data = topic_plans.get(key, {})
@@ -1076,37 +1088,33 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             f"버튼을 누르면 달성 상태로 전환되며 수확이 완료됩니다.\n"
         )
 
+    # 1. 디스플레이 카테고리(통합 제목) 기준으로 미완료 항목 수를 집계
     category_uncompleted_count = {}
     for _, item in filtered_plans_with_index:
-        cat = item.get("category", "")
-        if cat not in category_uncompleted_count:
-            category_uncompleted_count[cat] = 0
+        disp_cat = get_display_category(item.get("category", ""))
+        if disp_cat not in category_uncompleted_count:
+            category_uncompleted_count[disp_cat] = 0
         if not item["done"]:
-            category_uncompleted_count[cat] += 1
+            category_uncompleted_count[disp_cat] += 1
 
     keyboard = []
-    last_category = None
+    last_display_category = None
 
     for real_idx, item in filtered_plans_with_index:
         category = item.get("category", "")
+        disp_cat = get_display_category(category)
         
         if is_night_mode:
             should_show = (not item["done"]) or (visible_indices is not None and real_idx in visible_indices)
         else:
             should_show = (visible_indices is not None and real_idx in visible_indices) or \
-                          (visible_indices is None and category_uncompleted_count.get(category, 0) > 0)
+                          (visible_indices is None and category_uncompleted_count.get(disp_cat, 0) > 0)
 
         if should_show:
-            if category and category != last_category:
-                if category == "[매일]":
-                    cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
-                elif "요일" in category:
-                    cat_disp = "📅 [요일별 수확 과제]"
-                else:
-                    cat_disp = f"☁️ {category.replace('[일반]', '[구름 언덕 공부방]')}"
-
-                keyboard.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
-                last_category = category
+            # 2. 통합된 디스플레이 카테고리가 달라질 때만 새 섹션 제목을 렌더링
+            if disp_cat != last_display_category:
+                keyboard.append([InlineKeyboardButton(disp_cat, callback_data="noop")])
+                last_display_category = disp_cat
 
             is_routine = "[매일]" in category
             if item.get("is_bible"):
@@ -1209,17 +1217,23 @@ def build_weekly_view(key):
 
     if uncompleted:
         msg += f"🌧️ **[미완료된 항목 - 추가 점검 필요]** ({len(uncompleted)}개)\n"
-        current_cat = None
+        
+        # 통합 섹션 출력을 위해 uncompleted를 우선순위와 카테고리에 맞게 정렬
+        uncompleted.sort(key=lambda x: (
+            get_category_priority(x.get("category", "")),
+            x.get("category", "")
+        ))
+
+        current_disp_cat = None
 
         for p in uncompleted:
             cat = p.get("category", "")
-            if cat and cat != current_cat:
-                if cat == "[매일]": cat_disp = "🐦‍⬛ [까마귀의 매일 루틴]"
-                elif "요일" in cat: cat_disp = "📅 [요일별 수확 과제]"
-                else: cat_disp = f"☁️ {cat.replace('[일반]', '[구름 언덕 공부방]')}"
-                msg += f"\n{cat_disp}\n"
-                keyboard.append([InlineKeyboardButton(cat_disp, callback_data="noop")])
-                current_cat = cat
+            disp_cat = get_display_category(cat)
+            
+            if disp_cat != current_disp_cat:
+                msg += f"\n{disp_cat}\n"
+                keyboard.append([InlineKeyboardButton(disp_cat, callback_data="noop")])
+                current_disp_cat = disp_cat
 
             date_str = f" ({p['date']})" if "date" in p else ""
 
