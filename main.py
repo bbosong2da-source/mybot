@@ -984,7 +984,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
                 days_left = (target_date - now_date).days
                 
                 pool_count = sum(1 for p in task_pool if p["category"] == cat)
-                plans_count = sum(1 for p in plans if p.get("category") == cat and not p.get("done"))
+                plans_count = sum(1 for p in plans if p.get("category") == cat and not p.get("done") and not p.get("hidden"))
                 total_left = pool_count + plans_count
                 
                 if total_left == 0: continue
@@ -1032,7 +1032,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
         )
     )
 
-    today_only_plans = [p for _, p in filtered_plans_with_index]
+    today_only_plans = [p for _, p in filtered_plans_with_index if not p.get("hidden")]
     normal_plans = [p for p in today_only_plans if "[매일]" not in p.get("category", "")]
     routine_plans = [p for p in today_only_plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
     bible_plans = [p for p in today_only_plans if p.get("is_bible") == True]
@@ -1056,12 +1056,16 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total})")
 
     if bible_plans:
-        track_count = len(bible_plans)
-        stat_lines.append(f"📖 **성경 묵상:** {track_count}개 트랙 병행 중 📜")
+        b_completed = sum(1 for p in bible_plans if p["done"])
+        status_str = "완성 📖" if b_completed == len(bible_plans) else "진행 중 📜"
+        bible_labels = [p["task"].replace("성경 묵상: ", "").strip() for p in bible_plans]
+        stat_lines.append(f"📖 **성경 묵상:** {', '.join(bible_labels)} (`{status_str}`)")
 
     if transcription_plans:
-        track_count = len(transcription_plans)
-        stat_lines.append(f"✍🏻 **성경 필사:** {track_count}개 트랙 병행 중 🪵")
+        t_completed = sum(1 for p in transcription_plans if p["done"])
+        t_status_str = "한 후 🪿" if t_completed == len(transcription_plans) else "하는 중 🪵"
+        trans_labels = [p["task"].replace("성경 필사: ", "").strip() for p in transcription_plans]
+        stat_lines.append(f"✍🏻 **성경 필사:** {', '.join(trans_labels)} (`{t_status_str}`)")
 
     stat_str = "\n".join(stat_lines)
 
@@ -1083,17 +1087,30 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             f"버튼을 누르면 달성 상태로 전환되며 수확이 완료됩니다.\n"
         )
 
+    category_uncompleted_count = {}
+    for real_idx, item in filtered_plans_with_index:
+        if item.get("hidden"):
+            continue
+        disp_cat = get_display_category(item.get("category", ""))
+        if disp_cat not in category_uncompleted_count:
+            category_uncompleted_count[disp_cat] = 0
+        if not item.get("done"):
+            category_uncompleted_count[disp_cat] += 1
+
     keyboard = []
     last_display_category = None
 
     for real_idx, item in filtered_plans_with_index:
+        if item.get("hidden"):
+            continue
+
         category = item.get("category", "")
         disp_cat = get_display_category(category)
         
         if visible_indices is not None:
             should_show = real_idx in visible_indices
         else:
-            should_show = not item["done"]
+            should_show = category_uncompleted_count.get(disp_cat, 0) > 0
 
         if should_show:
             if disp_cat != last_display_category:
@@ -1136,16 +1153,14 @@ def build_weekly_view(key):
     if not plans and "read_chapters" not in data and "transcribed_verses" not in data:
         return "🍃 이번 주에 등록된 공부/성경 읽기/필사 계획이 없습니다.", None
 
-    uncompleted = [p for p in plans if not p["done"]]
+    uncompleted = [p for p in plans if not p["done"] and not p.get("hidden")]
 
     week_range_str = get_korean_week_range_str()
     msg = f"🍃 **[이번 주 공부 & 성경 정산 리포트] ({week_range_str})**\n\n"
 
-    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "")]
-    routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")]
-    bible_plans = [p for p in plans if p.get("is_bible") == True]
-    transcription_plans = [p for p in plans if p.get("is_transcription") == True]
-
+    normal_plans = [p for p in plans if "[매일]" not in p.get("category", "") and not p.get("hidden")]
+    routine_plans = [p for p in plans if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden")]
+    
     if normal_plans:
         n_completed = sum(1 for p in normal_plans if p["done"])
         n_total = len(normal_plans)
@@ -1680,7 +1695,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_bible_task = target_item.get("is_bible", False)
             is_trans_task = target_item.get("is_transcription", False)
 
-            # 💡 [새로 추가] 성경 완료 시 '읽은 장/절' 바구니에 고유 번호 추가
             if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = target_item.get("bible_chunk", topic_data.get("bible_chunk", 4))
@@ -1801,6 +1815,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await asyncio.sleep(1)
 
+            disp_cat = get_display_category(target_item.get("category", ""))
+            today_str = get_logical_now().strftime("%m/%d")
+            
+            active_tasks_in_cat = [
+                p for p in plans 
+                if get_display_category(p.get("category", "")) == disp_cat
+                and not p.get("hidden")
+                and (p.get("date") == today_str or not p.get("done"))
+            ]
+            
+            if active_tasks_in_cat and all(p.get("done") for p in active_tasks_in_cat):
+                for p in active_tasks_in_cat:
+                    p["hidden"] = True
+                save_data_to_supabase(key, topic_plans[key])
+
             if is_bible_task and target_item["done"]:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
                 chunk_size = target_item.get("bible_chunk", topic_data.get("bible_chunk", 4))
@@ -1810,6 +1839,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_item["task"] = f"성경 묵상: {next_label}"
                 target_item["done"] = False
                 target_item["bible_ch_idx"] = next_ch_idx
+                target_item.pop("hidden", None)
                 save_data_to_supabase(key, topic_plans[key])
 
             if is_trans_task and target_item["done"]:
@@ -1821,6 +1851,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_item["task"] = f"성경 필사: {next_label}"
                 target_item["done"] = False
                 target_item["transcription_v_idx"] = next_v_idx
+                target_item.pop("hidden", None)
                 save_data_to_supabase(key, topic_plans[key])
 
             text_final, reply_markup_final = build_plan_view(key, visible_indices=None, is_night_mode=is_night_mode)
@@ -1901,7 +1932,7 @@ async def sunday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
         weekly_text, _ = build_weekly_view(key)
         plans = data.get("plans", [])
         
-        uncompleted_count = sum(1 for p in plans if not p["done"] and not p.get("is_bible") and not p.get("is_transcription"))
+        uncompleted_count = sum(1 for p in plans if not p["done"] and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden"))
 
         msg = (
             "🍃 **[일요일 주간 정산 및 점검 리포트]**\n\n"
@@ -1946,7 +1977,7 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
         plans = data.get("plans", [])
         
         for p in plans:
-            if not p.get("done") and "[매일]" not in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription"):
+            if not p.get("done") and "[매일]" not in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden"):
                 p["delay_count"] = p.get("delay_count", 0) + 1
 
         routine_names = list(dict.fromkeys([
@@ -1992,7 +2023,7 @@ async def sunday_rollover_job(context: ContextTypes.DEFAULT_TYPE):
             continue
         plans = data.get("plans", [])
         
-        uncompleted_plans = [p for p in plans if not p["done"]]
+        uncompleted_plans = [p for p in plans if not p["done"] and not p.get("hidden")]
         topic_plans[key]["plans"] = uncompleted_plans
         topic_plans[key]["weekly_tasks"] = {}
         save_data_to_supabase(key, topic_plans[key])
