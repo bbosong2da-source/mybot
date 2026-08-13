@@ -14,6 +14,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Update,
+    ForceReply,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -299,7 +300,7 @@ WELCOME_MESSAGES = [
     "• **마스터 태스크 풀:** `/p [카테고리] 할일`\n"
     "• **태스크 풀 인양:** `/pk`\n"
     "• **D-Day 설정:** `/dd [카테고리] YY/MM/DD`\n"
-    "• **할 일 삭제:** `/d [정확한 할일 명], [취소사유]`\n"
+    "• **할 일 삭제 (낮):** `/d [정확한 할일 명], [사유]`\n"
     "• **성경 하루 분량:** `/bp [장수]`\n"
     "• **성경 시작점:** `/bs [분량]`\n"
     "• **성경 완독 현황판:** `/st`\n"
@@ -884,7 +885,7 @@ async def transcription_status(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 삭제 시 사유 강제 작성 로직
+# 삭제 시 사유 강제 작성 로직 (주간/텍스트 명령어용)
 # ---------------------------------------------------------
 async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -914,12 +915,12 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_idx = -1
     for i, p in enumerate(plans):
-        if p["task"].strip() == target_task_name:
+        if p["task"].strip() == target_task_name and not p.get("done"):
             target_idx = i
             break
 
     if target_idx == -1:
-        await update.message.reply_text(f"🌧️ `{target_task_name}`과(와) 정확히 일치하는 할 일을 찾을 수 없습니다.\n(띄어쓰기와 글자를 확인해 주세요!)")
+        await update.message.reply_text(f"🌧️ `{target_task_name}`과(와) 일치하는 미완료 할 일을 찾을 수 없습니다.")
         return
 
     target = plans[target_idx]
@@ -943,7 +944,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     plan_text, reply_markup = build_plan_view(key)
     await update.message.reply_text(
-        f"{ack}**`{deleted_item['task']}` 항목이 삭제되었습니다.** (통계 분모에서 제외)\n\n"
+        f"{ack}**`{deleted_item['task']}` 항목이 삭제되었습니다.**\n\n"
         f"-------------------------\n"
         f"{plan_text}",
         reply_markup=reply_markup,
@@ -1104,6 +1105,9 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
         if item.get("hidden"):
             continue
 
+        if is_night_mode and item.get("done") and (visible_indices is None or real_idx not in visible_indices):
+            continue
+
         category = item.get("category", "")
         disp_cat = get_display_category(category)
         
@@ -1137,8 +1141,8 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             
             is_special = is_routine or item.get("is_bible") or item.get("is_transcription")
             
-            if is_night_mode and not is_special:
-                del_btn = InlineKeyboardButton("삭제", callback_data=f"del_alert_{real_idx}")
+            if is_night_mode and not is_special and not item.get("done"):
+                del_btn = InlineKeyboardButton("삭제", callback_data=f"del_night_{real_idx}")
                 keyboard.append([task_btn, del_btn])
             else:
                 keyboard.append([task_btn])
@@ -1310,7 +1314,7 @@ async def add_to_pool(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "task_pool" not in topic_plans[key]:
         topic_plans[key]["task_pool"] = []
 
-    added_tasks = []
+    categories = {}
     current_cat = "[일반]"
     
     for line in lines:
@@ -1330,11 +1334,21 @@ async def add_to_pool(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "task": task_str,
                 "category": current_cat
             })
-            added_tasks.append(f"• `{current_cat} {task_str}`")
+            if current_cat not in categories:
+                categories[current_cat] = []
+            categories[current_cat].append(task_str)
 
     save_data_to_supabase(key, topic_plans[key])
-    msg = "☁️ **태스크 풀에 조용히 보관되었습니다.**\n\n" + "\n".join(added_tasks) + "\n\n(오늘 인양하려면 `/pk` 입력)"
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    
+    msg = "☁️ **태스크 풀에 조용히 보관되었습니다.**\n\n"
+    for c, t_list in categories.items():
+        msg += f"**{c}**\n"
+        for t in t_list:
+            msg += f"  • {t}\n"
+        msg += "\n"
+    msg += "(오늘 인양하려면 `/pk` 입력)"
+    
+    await update.message.reply_text(msg.strip(), parse_mode="Markdown")
 
 async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1347,9 +1361,18 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🍃 마스터 태스크 풀이 비어있습니다. `/p [카테고리] 할일` 로 채워보세요.")
         return
 
-    keyboard = []
+    grouped = {}
     for idx, item in enumerate(pool):
-        keyboard.append([InlineKeyboardButton(f"☁️ {item['category']} {item['task']}", callback_data=f"pick_{idx}")])
+        cat = item["category"]
+        if cat not in grouped:
+            grouped[cat] = []
+        grouped[cat].append((idx, item["task"]))
+
+    keyboard = []
+    for cat, items in grouped.items():
+        keyboard.append([InlineKeyboardButton(f"📁 {cat}", callback_data="noop")])
+        for idx, task_name in items:
+            keyboard.append([InlineKeyboardButton(f"  ☁️ {task_name}", callback_data=f"pick_{idx}")])
     
     await update.message.reply_text(
         "📂 **[마스터 태스크 풀 - 잠자는 항목들]**\n오늘 정원에 심을 씨앗을 1개씩 선택해 주세요!",
@@ -1358,7 +1381,7 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# Message Handler (태스크 바로 추가)
+# Message Handler (태스크 바로 추가 & ForceReply 처리)
 # ---------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1373,6 +1396,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if key in topic_plans and topic_plans[key].get("disabled", False):
         return
+
+    # 💡 야간 모드 ForceReply(강제 답장)를 통한 삭제 처리
+    if update.message.reply_to_message and update.message.reply_to_message.text:
+        replied_text = update.message.reply_to_message.text
+        if "이곳에 취소 사유(10자 이상)를" in replied_text:
+            match = re.search(r"🗑️ `(.*?)`을\(를\) 삭제합니다", replied_text)
+            if match:
+                task_name = match.group(1)
+                reason = text.strip()
+                
+                if len(reason) < 10:
+                    await update.message.reply_text("🚨 취소 사유는 10자 이상 작성해 주세요. (위 봇의 질문 메시지에 다시 답장해 주세요!)")
+                    return
+                
+                target_idx = -1
+                plans = topic_plans[key].get("plans", [])
+                for i, p in enumerate(plans):
+                    if p["task"] == task_name and not p.get("done"):
+                        target_idx = i
+                        break
+                
+                if target_idx != -1:
+                    plans.pop(target_idx)
+                    save_data_to_supabase(key, topic_plans[key])
+                    plan_text, reply_markup = build_plan_view(key, is_night_mode=True)
+                    await update.message.reply_text(
+                        f"➖ 사유 승인됨: '{reason}'\n**`{task_name}` 항목이 삭제되었습니다.**\n\n-------------------------\n{plan_text}",
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await update.message.reply_text(f"🌧️ `{task_name}` 항목을 찾을 수 없거나 이미 완료/삭제되었습니다.")
+                return
 
     if text.startswith("질문:") or text.startswith("질문 "):
         question_text = re.sub(r"^질문[:\s]*", "", text).strip()
@@ -1551,8 +1607,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (chat_id, thread_id)
     data = query.data
 
-    if data.startswith("del_alert_"):
-        await query.answer("이 할 일을 삭제하려면 채팅창에 /d [할일명], [취소사유 10자 이상]을 입력해 주세요.", show_alert=True)
+    if data.startswith("del_night_"):
+        idx = int(data.split("_")[2])
+        topic_data = topic_plans.get(key, {})
+        plans = topic_data.get("plans", [])
+        
+        if 0 <= idx < len(plans):
+            task_name = plans[idx]["task"]
+            await context.bot.send_message(
+                chat_id=chat_id,
+                message_thread_id=thread_id if thread_id != 0 else None,
+                text=f"🗑️ `{task_name}`을(를) 삭제합니다.\n이곳에 취소 사유(10자 이상)를 답장(Reply)으로 입력해 주세요.",
+                reply_markup=ForceReply(selective=True),
+                parse_mode="Markdown"
+            )
+        await query.answer()
         return
 
     if data.startswith("pick_"):
@@ -1569,36 +1638,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             plans.append(task)
             save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text(f"🌱 **`{task['category']} {task['task']}`** 항목이 '오늘 할 일'로 활성화되었습니다!\n계속해서 다른 항목도 불러오시려면 `/pk`를 다시 입력해 주세요.", parse_mode="Markdown")
-        return
-
-    if data.startswith("delete_item_"):
-        idx = int(data.split("_")[2])
-        topic_data = topic_plans.get(key, {})
-        plans = topic_data.get("plans", [])
-
-        if 0 <= idx < len(plans):
-            target = plans[idx]
-            is_special = target.get("is_bible") or target.get("is_transcription") or "[매일]" in target.get("category", "")
-            
-            if not is_special:
-                await query.answer("🚨 일반 과제는 /d [할일명], [취소사유 10자 이상] 명령어로만 삭제할 수 있습니다.", show_alert=True)
-                return
-            
-            deleted_item = plans.pop(idx)
-            save_data_to_supabase(key, topic_plans[key])
-            await query.answer(f"➖ '{deleted_item['task']}' 항목이 삭제되었습니다.")
-            
-            text_instant, reply_markup_instant = build_plan_view(key)
-            original_text = query.message.text or ""
-            if "야간 정원 점검" in original_text:
-                header = original_text.split("-------------------------")[0] if "-------------------------" in original_text else ""
-                if not header: header = "🌙 **[야간 정원 점검]**\n\n"
-                text_instant = f"{header}-------------------------\n{text_instant}"
-
-            try:
-                await query.edit_message_text(text_instant, reply_markup=reply_markup_instant, parse_mode="Markdown")
-            except:
-                pass
         return
 
     if data.startswith("weekly_opt_"):
