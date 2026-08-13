@@ -947,7 +947,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# UI 빌더 (섹션 통합 기능 반영 및 이모지 변경)
+# UI 빌더 (섹션 통합 기능 반영 및 이모지 변경, 깜빡임 방지)
 # ---------------------------------------------------------
 def get_category_priority(category_name):
     if category_name == "[매일]": return 1
@@ -963,7 +963,7 @@ def get_display_category(category_name):
     if category_name == "[매일]":
         return "🐦‍⬛ [까마귀의 매일 루틴]"
     elif "요일" in category_name:
-        return "📅 [요일별 수확 과제]"
+        return "🍎 [요일별 수확 과제]"
     else:
         return f"☁️ {category_name.replace('[일반]', '[구름 언덕 공부방]')}"
 
@@ -1024,6 +1024,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
     
     filtered_plans_with_index.reverse()
 
+    # 정렬: 요일 카테고리들이 모두 2번 우선순위를 가지므로 뭉쳐서 나옵니다.
     filtered_plans_with_index.sort(
         key=lambda x: (
             get_category_priority(x[1].get("category", "")),
@@ -1090,7 +1091,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
 
     # 1. 디스플레이 카테고리(통합 제목) 기준으로 미완료 항목 수를 집계
     category_uncompleted_count = {}
-    for _, item in filtered_plans_with_index:
+    for real_idx, item in filtered_plans_with_index:
         disp_cat = get_display_category(item.get("category", ""))
         if disp_cat not in category_uncompleted_count:
             category_uncompleted_count[disp_cat] = 0
@@ -1104,11 +1105,15 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
         category = item.get("category", "")
         disp_cat = get_display_category(category)
         
-        if is_night_mode:
-            should_show = (not item["done"]) or (visible_indices is not None and real_idx in visible_indices)
+        # 1초 뒤 사라지는 효과를 위한 잔상/깜빡임 완벽 제거 로직
+        if visible_indices is not None:
+            # visible_indices가 주어졌을 때는 '지금 화면에 살아있는 버튼'만 렌더링
+            should_show = real_idx in visible_indices
         else:
-            should_show = (visible_indices is not None and real_idx in visible_indices) or \
-                          (visible_indices is None and category_uncompleted_count.get(disp_cat, 0) > 0)
+            if is_night_mode:
+                should_show = not item["done"]
+            else:
+                should_show = category_uncompleted_count.get(disp_cat, 0) > 0
 
         if should_show:
             # 2. 통합된 디스플레이 카테고리가 달라질 때만 새 섹션 제목을 렌더링
@@ -1117,11 +1122,13 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
                 last_display_category = disp_cat
 
             is_routine = "[매일]" in category
+            is_weekly = "요일" in category
+            
             if item.get("is_bible"):
                 status_icon = "📖" if item["done"] else "📜"
             elif item.get("is_transcription"):
                 status_icon = "🪿" if item["done"] else "🪵"
-            elif is_routine:
+            elif is_routine or is_weekly:
                 status_icon = "🍋" if item["done"] else "🥚"
             else:
                 status_icon = "🎓" if item["done"] else "🥚"
@@ -1218,7 +1225,6 @@ def build_weekly_view(key):
     if uncompleted:
         msg += f"🌧️ **[미완료된 항목 - 추가 점검 필요]** ({len(uncompleted)}개)\n"
         
-        # 통합 섹션 출력을 위해 uncompleted를 우선순위와 카테고리에 맞게 정렬
         uncompleted.sort(key=lambda x: (
             get_category_priority(x.get("category", "")),
             x.get("category", "")
@@ -1238,9 +1244,10 @@ def build_weekly_view(key):
             date_str = f" ({p['date']})" if "date" in p else ""
 
             is_routine = "[매일]" in cat
+            is_weekly = "요일" in cat
             if p.get("is_bible"): icon = "📜"
             elif p.get("is_transcription"): icon = "🪵"
-            elif is_routine: icon = "🥚"
+            elif is_routine or is_weekly: icon = "🥚"
             else: icon = "🥚"
 
             msg += f"  {icon} {p['task']}{date_str}\n"
@@ -1282,7 +1289,7 @@ async def set_dday(update: Update, context: ContextTypes.DEFAULT_TYPE):
             topic_plans[key]["ddays"] = {}
         topic_plans[key]["ddays"][cat_key] = date_str
         save_data_to_supabase(key, topic_plans[key])
-        await update.message.reply_text(f"🎯 **{cat_key} 마마감일이 {date_str}로 설정되었습니다!**\n상태창 상단에서 페이스를 확인하세요.", parse_mode="Markdown")
+        await update.message.reply_text(f"🎯 **{cat_key} 마감일이 {date_str}로 설정되었습니다!**\n상태창 상단에서 페이스를 확인하세요.", parse_mode="Markdown")
     except ValueError:
         await update.message.reply_text("🌧️ 날짜 형식이 올바르지 않습니다. (예: 26/11/30)")
 
@@ -1296,26 +1303,39 @@ async def add_to_pool(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_input = re.sub(r"^/(p|pool)\s*", "", text, flags=re.IGNORECASE).strip()
 
     if not raw_input:
-        await update.message.reply_text("💡 **형식:** `/p [카테고리] 할 일`\n(태스크 풀에 보관되며 오늘 할 일엔 뜨지 않습니다.)", parse_mode="Markdown")
+        await update.message.reply_text("💡 **형식:** `/p [카테고리] 할 일`\n(여러 줄을 입력하시면 각각 개별 항목으로 저장됩니다)", parse_mode="Markdown")
         return
 
-    cat_match = re.search(r"^\[(.*?)\]\s*(.*)$", raw_input)
-    if cat_match:
-        cat = f"[{cat_match.group(1).strip()}]"
-        task = cat_match.group(2).strip()
-    else:
-        cat = "[일반]"
-        task = raw_input
-
+    lines = raw_input.split("\n")
     if "task_pool" not in topic_plans[key]:
         topic_plans[key]["task_pool"] = []
 
-    topic_plans[key]["task_pool"].append({
-        "task": task,
-        "category": cat
-    })
+    added_tasks = []
+    current_cat = "[일반]"
+    
+    for line in lines:
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        
+        # 카테고리 태그가 있는지 확인
+        cat_match = re.search(r"^\[(.*?)\]\s*(.*)$", line_clean)
+        if cat_match:
+            current_cat = f"[{cat_match.group(1).strip()}]"
+            task_str = cat_match.group(2).strip()
+        else:
+            task_str = line_clean
+            
+        if task_str:
+            topic_plans[key]["task_pool"].append({
+                "task": task_str,
+                "category": current_cat
+            })
+            added_tasks.append(f"• `{current_cat} {task_str}`")
+
     save_data_to_supabase(key, topic_plans[key])
-    await update.message.reply_text(f"☁️ 태스크 풀에 조용히 보관되었습니다.\n`{cat} {task}`\n(오늘 인양하려면 `/pk` 입력)", parse_mode="Markdown")
+    msg = "☁️ **태스크 풀에 조용히 보관되었습니다.**\n\n" + "\n".join(added_tasks) + "\n\n(오늘 인양하려면 `/pk` 입력)"
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -1333,7 +1353,7 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(f"☁️ {item['category']} {item['task']}", callback_data=f"pick_{idx}")])
     
     await update.message.reply_text(
-        "📂 **[마스터 태스크 풀 - 잠자는 항목들]**\n오늘 정원에 심을 씨앗을 선택해 주세요!",
+        "📂 **[마스터 태스크 풀 - 잠자는 항목들]**\n오늘 정원에 심을 씨앗을 1개씩 선택해 주세요!",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -1549,7 +1569,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             task["delay_count"] = 0
             plans.append(task)
             save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text(f"🌱 **`{task['category']} {task['task']}`** 항목이 '오늘 할 일'로 활성화되었습니다!", parse_mode="Markdown")
+            await query.edit_message_text(f"🌱 **`{task['category']} {task['task']}`** 항목이 '오늘 할 일'로 활성화되었습니다!\n계속해서 다른 항목도 불러오시려면 `/pk`를 다시 입력해 주세요.", parse_mode="Markdown")
         return
 
     if data.startswith("delete_item_"):
