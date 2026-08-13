@@ -1110,10 +1110,7 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             # visible_indices가 주어졌을 때는 '지금 화면에 살아있는 버튼'만 렌더링
             should_show = real_idx in visible_indices
         else:
-            if is_night_mode:
-                should_show = not item["done"]
-            else:
-                should_show = category_uncompleted_count.get(disp_cat, 0) > 0
+            should_show = not item["done"]
 
         if should_show:
             # 2. 통합된 디스플레이 카테고리가 달라질 때만 새 섹션 제목을 렌더링
