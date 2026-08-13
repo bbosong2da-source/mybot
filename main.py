@@ -217,7 +217,7 @@ def get_transcription_label(start_verse_idx, chunk_size):
         return f"{start_book} {start_ch}:{start_v} - {end_ch}:{end_v}"
     return f"{start_book} {start_ch}:{start_v} - {end_book} {end_ch}:{end_v}"
 
-def generate_bible_status_text(current_ch_idx):
+def generate_bible_status_text(read_chapters):
     current_global_idx = 0
     msg = "📖 **[성경 66권 완독 현황판]**\n"
     msg += "완성: 📖 | 진행중: 📜 | 시작 전: ✉️\n\n"
@@ -231,9 +231,11 @@ def generate_bible_status_text(current_ch_idx):
         if idx == 39:
             msg += "\n\n📕 **[신약 27권]**\n"
 
-        if current_ch_idx > book_end_idx:
+        read_count = sum(1 for i in range(book_start_idx, book_end_idx + 1) if i in read_chapters)
+
+        if read_count == total_ch:
             status_icon = "📖"
-        elif book_start_idx <= current_ch_idx <= book_end_idx:
+        elif read_count > 0:
             status_icon = "📜"
         else:
             status_icon = "✉️"
@@ -250,7 +252,7 @@ def generate_bible_status_text(current_ch_idx):
 
     return msg
 
-def generate_transcription_status_text(current_v_idx):
+def generate_transcription_status_text(transcribed_verses):
     current_global_v_idx = 0
     msg = "✍🏻 **[성경 66권 필사 현황판]**\n"
     msg += "한 후: 🪿 | 하는중: 🪵 | 하기 전: 🌿\n\n"
@@ -265,9 +267,11 @@ def generate_transcription_status_text(current_v_idx):
         if idx == 39:
             msg += "\n\n📕 **[신약 27권]**\n"
 
-        if current_v_idx > book_end_v_idx:
+        read_count = sum(1 for i in range(book_start_v_idx, book_end_v_idx + 1) if i in transcribed_verses)
+
+        if read_count == book_total_v:
             status_icon = "🪿"
-        elif book_start_v_idx <= current_v_idx <= book_end_v_idx:
+        elif read_count > 0:
             status_icon = "🪵"
         else:
             status_icon = "🌿"
@@ -347,9 +351,9 @@ def default_topic_data(user_name):
         "plans": [],
         "task_pool": [],
         "ddays": {},
-        "bible_ch_idx": 0,
+        "read_chapters": [],
+        "transcribed_verses": [],
         "bible_chunk": 4,
-        "transcription_v_idx": 0,
         "transcription_chunk": 10,
         "weekly_tasks": {},
         "notify_time": None,
@@ -757,14 +761,13 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
-    topic_plans[key]["bible_ch_idx"] = matched_ch_idx
 
     chunk_size = topic_plans[key].get("bible_chunk", 4)
     target_label = get_bible_label(matched_ch_idx, chunk_size)
     today_str = get_logical_now().strftime("%m/%d")
 
-    plans = topic_plans[key].get("plans", [])
-    topic_plans[key]["plans"] = [p for p in plans if p.get("is_bible") != True]
+    if "plans" not in topic_plans[key]:
+        topic_plans[key]["plans"] = []
     
     topic_plans[key]["plans"].append({
         "task": f"성경 묵상: {target_label}",
@@ -772,7 +775,8 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "done": False,
         "date": today_str,
         "is_bible": True,
-        "bible_ch_idx": matched_ch_idx
+        "bible_ch_idx": matched_ch_idx,
+        "bible_chunk": chunk_size
     })
     save_data_to_supabase(key, topic_plans[key])
 
@@ -790,9 +794,9 @@ async def bible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def bible_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     data = topic_plans.get(key, {})
-    current_ch_idx = data.get("bible_ch_idx", 0)
+    read_chapters = data.get("read_chapters", [])
 
-    msg = generate_bible_status_text(current_ch_idx)
+    msg = generate_bible_status_text(read_chapters)
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def transcription_pages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -841,14 +845,13 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if key not in topic_plans:
         topic_plans[key] = default_topic_data(user_name)
-    topic_plans[key]["transcription_v_idx"] = matched_v_idx
 
     chunk_size = topic_plans[key].get("transcription_chunk", 10)
     target_label = get_transcription_label(matched_v_idx, chunk_size)
     today_str = get_logical_now().strftime("%m/%d")
 
-    plans = topic_plans[key].get("plans", [])
-    topic_plans[key]["plans"] = [p for p in plans if p.get("is_transcription") != True]
+    if "plans" not in topic_plans[key]:
+        topic_plans[key]["plans"] = []
     
     topic_plans[key]["plans"].append({
         "task": f"성경 필사: {target_label}",
@@ -856,7 +859,8 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         "done": False,
         "date": today_str,
         "is_transcription": True,
-        "transcription_v_idx": matched_v_idx
+        "transcription_v_idx": matched_v_idx,
+        "transcription_chunk": chunk_size
     })
     save_data_to_supabase(key, topic_plans[key])
 
@@ -874,13 +878,13 @@ async def transcription_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def transcription_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
     data = topic_plans.get(key, {})
-    current_v_idx = data.get("transcription_v_idx", 0)
+    transcribed_verses = data.get("transcribed_verses", [])
 
-    msg = generate_transcription_status_text(current_v_idx)
+    msg = generate_transcription_status_text(transcribed_verses)
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 삭제 시 사유 강제 작성 로직 (형식: /d [정확한 할일 명], [취소사유])
+# 삭제 시 사유 강제 작성 로직
 # ---------------------------------------------------------
 async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
@@ -947,7 +951,7 @@ async def delete_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ---------------------------------------------------------
-# UI 빌더 (섹션 통합 기능 반영 및 이모지 변경, 깜빡임 방지)
+# UI 빌더
 # ---------------------------------------------------------
 def get_category_priority(category_name):
     if category_name == "[매일]": return 1
@@ -956,10 +960,6 @@ def get_category_priority(category_name):
     else: return 3
 
 def get_display_category(category_name):
-    """
-    카테고리 이름을 화면에 보여줄 통합된 섹션 제목으로 변환합니다.
-    요일별 과제들이 모두 하나의 섹션으로 묶이도록 처리합니다.
-    """
     if category_name == "[매일]":
         return "🐦‍⬛ [까마귀의 매일 루틴]"
     elif "요일" in category_name:
@@ -974,7 +974,6 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
     task_pool = data.get("task_pool", [])
     today_str = get_logical_now().strftime("%m/%d")
 
-    # [D-Day 계산 및 요약]
     dday_summary = ""
     if ddays:
         tz = pytz.timezone("Asia/Seoul")
@@ -1024,7 +1023,6 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
     
     filtered_plans_with_index.reverse()
 
-    # 정렬: 요일 카테고리들이 모두 2번 우선순위를 가지므로 뭉쳐서 나옵니다.
     filtered_plans_with_index.sort(
         key=lambda x: (
             get_category_priority(x[1].get("category", "")),
@@ -1058,16 +1056,12 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             stat_lines.append(f"🍋 **매일 루틴:** `{r_rate:.1f}%` ({r_completed}/{r_total})")
 
     if bible_plans:
-        b_completed = sum(1 for p in bible_plans if p["done"])
-        status_str = "완성 📖" if b_completed > 0 else "진행 중 📜"
-        bible_task_name = bible_plans[0]['task'].replace('성경 묵상: ', '')
-        stat_lines.append(f"📖 **성경 묵상:** {bible_task_name} (`{status_str}`)")
+        track_count = len(bible_plans)
+        stat_lines.append(f"📖 **성경 묵상:** {track_count}개 트랙 병행 중 📜")
 
     if transcription_plans:
-        t_completed = sum(1 for p in transcription_plans if p["done"])
-        t_status_str = "한 후 🪿" if t_completed > 0 else "하는 중 🪵"
-        trans_task_name = transcription_plans[0]['task'].replace('성경 필사: ', '')
-        stat_lines.append(f"✍🏻 **성경 필사:** {trans_task_name} (`{t_status_str}`)")
+        track_count = len(transcription_plans)
+        stat_lines.append(f"✍🏻 **성경 필사:** {track_count}개 트랙 병행 중 🪵")
 
     stat_str = "\n".join(stat_lines)
 
@@ -1089,15 +1083,6 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
             f"버튼을 누르면 달성 상태로 전환되며 수확이 완료됩니다.\n"
         )
 
-    # 1. 디스플레이 카테고리(통합 제목) 기준으로 미완료 항목 수를 집계
-    category_uncompleted_count = {}
-    for real_idx, item in filtered_plans_with_index:
-        disp_cat = get_display_category(item.get("category", ""))
-        if disp_cat not in category_uncompleted_count:
-            category_uncompleted_count[disp_cat] = 0
-        if not item["done"]:
-            category_uncompleted_count[disp_cat] += 1
-
     keyboard = []
     last_display_category = None
 
@@ -1105,15 +1090,12 @@ def build_plan_view(key, visible_indices=None, is_night_mode=False):
         category = item.get("category", "")
         disp_cat = get_display_category(category)
         
-        # 1초 뒤 사라지는 효과를 위한 잔상/깜빡임 완벽 제거 로직
         if visible_indices is not None:
-            # visible_indices가 주어졌을 때는 '지금 화면에 살아있는 버튼'만 렌더링
             should_show = real_idx in visible_indices
         else:
             should_show = not item["done"]
 
         if should_show:
-            # 2. 통합된 디스플레이 카테고리가 달라질 때만 새 섹션 제목을 렌더링
             if disp_cat != last_display_category:
                 keyboard.append([InlineKeyboardButton(disp_cat, callback_data="noop")])
                 last_display_category = disp_cat
@@ -1151,7 +1133,7 @@ def build_weekly_view(key):
     data = topic_plans.get(key, {})
     plans = data.get("plans", [])
 
-    if not plans and "bible_ch_idx" not in data and "transcription_v_idx" not in data:
+    if not plans and "read_chapters" not in data and "transcribed_verses" not in data:
         return "🍃 이번 주에 등록된 공부/성경 읽기/필사 계획이 없습니다.", None
 
     uncompleted = [p for p in plans if not p["done"]]
@@ -1185,37 +1167,43 @@ def build_weekly_view(key):
         msg += "\n"
 
     msg += "📖 **[성경 묵상 & 필사 주간 누적 통계]**\n"
-    bible_weekly_completed = sum(1 for p in bible_plans if p["done"])
-    bible_weekly_rate = (bible_weekly_completed / 7.0) * 100 if bible_weekly_completed <= 7 else 100.0
-    msg += f"• **이번 주 성경 묵상 달성률:** `{bible_weekly_rate:.1f}%` ({bible_weekly_completed}/7일 완수)\n"
 
-    def get_completed_books_count_reading(current_ch_idx):
-        if current_ch_idx >= len(ALL_BIBLE_CHAPTERS): return 66
-        current_book_short = ALL_BIBLE_CHAPTERS[current_ch_idx][0]
-        for idx, (b_short, _, _, _) in enumerate(BIBLE_STRUCTURE):
-            if b_short == current_book_short: return idx
-        return 0
+    def get_completed_books_count_reading(read_chapters):
+        completed = 0
+        current_global_idx = 0
+        for _, _, total_ch, _ in BIBLE_STRUCTURE:
+            book_start_idx = current_global_idx
+            book_end_idx = current_global_idx + total_ch - 1
+            current_global_idx += total_ch
+            
+            read_count = sum(1 for i in range(book_start_idx, book_end_idx + 1) if i in read_chapters)
+            if read_count == total_ch:
+                completed += 1
+        return completed
 
-    def get_completed_books_count_transcription(current_v_idx):
-        if current_v_idx >= len(ALL_BIBLE_VERSES): return 66
-        current_book_short = ALL_BIBLE_VERSES[current_v_idx][0]
-        for idx, (b_short, _, _, _) in enumerate(BIBLE_STRUCTURE):
-            if b_short == current_book_short: return idx
-        return 0
+    def get_completed_books_count_transcription(transcribed_verses):
+        completed = 0
+        current_global_v_idx = 0
+        for _, _, _, verse_counts in BIBLE_STRUCTURE:
+            book_total_v = sum(verse_counts)
+            book_start_v_idx = current_global_v_idx
+            book_end_v_idx = current_global_v_idx + book_total_v - 1
+            current_global_v_idx += book_total_v
+            
+            read_count = sum(1 for i in range(book_start_v_idx, book_end_v_idx + 1) if i in transcribed_verses)
+            if read_count == book_total_v:
+                completed += 1
+        return completed
 
-    current_ch_idx = data.get("bible_ch_idx", 0)
-    chunk_size = data.get("bible_chunk", 4)
-    completed_books_b = get_completed_books_count_reading(current_ch_idx)
+    read_chapters = data.get("read_chapters", [])
+    completed_books_b = get_completed_books_count_reading(read_chapters)
     overall_rate_b = (completed_books_b / 66.0) * 100
-    current_label_b = get_bible_label(current_ch_idx, chunk_size) if current_ch_idx < len(ALL_BIBLE_CHAPTERS) else "완독 완료!"
-    msg += f"📖 **성경 읽기 통산 달성률:** `{overall_rate_b:.1f}%` ({completed_books_b}/66 권 완독) - `{current_label_b}`\n\n"
+    msg += f"📖 **성경 읽기 통산 달성률:** `{overall_rate_b:.1f}%` ({completed_books_b}/66 권 완독)\n\n"
 
-    current_v_idx = data.get("transcription_v_idx", 0)
-    t_chunk_size = data.get("transcription_chunk", 10)
-    completed_books_t = get_completed_books_count_transcription(current_v_idx)
+    transcribed_verses = data.get("transcribed_verses", [])
+    completed_books_t = get_completed_books_count_transcription(transcribed_verses)
     overall_rate_t = (completed_books_t / 66.0) * 100
-    current_label_t = get_transcription_label(current_v_idx, t_chunk_size) if current_v_idx < len(ALL_BIBLE_VERSES) else "필사 완료!"
-    msg += f"✍🏻 **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필) - `{current_label_t}`\n\n"
+    msg += f"✍🏻 **성경 필사 통산 달성률:** `{overall_rate_t:.1f}%` ({completed_books_t}/66 권 완필)\n\n"
 
     keyboard = []
 
@@ -1315,7 +1303,6 @@ async def add_to_pool(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not line_clean:
             continue
         
-        # 카테고리 태그가 있는지 확인
         cat_match = re.search(r"^\[(.*?)\]\s*(.*)$", line_clean)
         if cat_match:
             current_cat = f"[{cat_match.group(1).strip()}]"
@@ -1690,6 +1677,34 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if target_item["done"]:
                 target_item["date"] = get_logical_now().strftime("%m/%d")
 
+            is_bible_task = target_item.get("is_bible", False)
+            is_trans_task = target_item.get("is_transcription", False)
+
+            # 💡 [새로 추가] 성경 완료 시 '읽은 장/절' 바구니에 고유 번호 추가
+            if is_bible_task and not was_done:
+                curr_ch_idx = target_item.get("bible_ch_idx", 0)
+                chunk_size = target_item.get("bible_chunk", topic_data.get("bible_chunk", 4))
+                
+                if "read_chapters" not in topic_data:
+                    topic_data["read_chapters"] = []
+                
+                for i in range(chunk_size):
+                    read_idx = (curr_ch_idx + i) % len(ALL_BIBLE_CHAPTERS)
+                    if read_idx not in topic_data["read_chapters"]:
+                        topic_data["read_chapters"].append(read_idx)
+
+            if is_trans_task and not was_done:
+                curr_v_idx = target_item.get("transcription_v_idx", 0)
+                chunk_size = target_item.get("transcription_chunk", topic_data.get("transcription_chunk", 10))
+                
+                if "transcribed_verses" not in topic_data:
+                    topic_data["transcribed_verses"] = []
+                
+                for i in range(chunk_size):
+                    read_idx = (curr_v_idx + i) % len(ALL_BIBLE_VERSES)
+                    if read_idx not in topic_data["transcribed_verses"]:
+                        topic_data["transcribed_verses"].append(read_idx)
+
             save_data_to_supabase(key, topic_plans[key])
 
             if target_item["done"] and random.random() < 0.10:
@@ -1704,12 +1719,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await query.answer()
 
-            is_bible_task = target_item.get("is_bible", False)
-            is_trans_task = target_item.get("is_transcription", False)
-
             if is_bible_task and not was_done:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
-                chunk_size = topic_data.get("bible_chunk", 4)
+                chunk_size = target_item.get("bible_chunk", topic_data.get("bible_chunk", 4))
                 
                 curr_start_book, _ = ALL_BIBLE_CHAPTERS[curr_ch_idx]
                 next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
@@ -1719,7 +1731,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     full_name = get_full_book_name(curr_start_book)
                     next_full_name = get_full_book_name(next_start_book)
                     
-                    status_board_text = generate_bible_status_text(next_ch_idx)
+                    status_board_text = generate_bible_status_text(topic_data.get("read_chapters", []))
                     congrat_msg = (
                         f"🌱 **축하합니다! [{full_name}] 묵상을 완독하셨습니다!** 👏🏻✨\n\n"
                         f"끝까지 완수해내신 열정을 응원합니다!\n"
@@ -1736,7 +1748,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if is_trans_task and not was_done:
                 curr_v_idx = target_item.get("transcription_v_idx", 0)
-                chunk_size = topic_data.get("transcription_chunk", 10)
+                chunk_size = target_item.get("transcription_chunk", topic_data.get("transcription_chunk", 10))
                 
                 curr_start_book, _, _ = ALL_BIBLE_VERSES[curr_v_idx]
                 next_v_idx = (curr_v_idx + chunk_size) % len(ALL_BIBLE_VERSES)
@@ -1746,7 +1758,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     full_name = get_full_book_name(curr_start_book)
                     next_full_name = get_full_book_name(next_start_book)
                     
-                    t_status_board_text = generate_transcription_status_text(next_v_idx)
+                    t_status_board_text = generate_transcription_status_text(topic_data.get("transcribed_verses", []))
                     congrat_msg = (
                         f"🌱 **축하합니다! [{full_name}] 필사를 완필하셨습니다!** 👏🏻✨\n\n"
                         f"한 절 한 절 정성껏 남기신 노고에 박수를 보냅니다!\n"
@@ -1791,9 +1803,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if is_bible_task and target_item["done"]:
                 curr_ch_idx = target_item.get("bible_ch_idx", 0)
-                chunk_size = topic_data.get("bible_chunk", 4)
+                chunk_size = target_item.get("bible_chunk", topic_data.get("bible_chunk", 4))
                 next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
-                topic_data["bible_ch_idx"] = next_ch_idx
                 next_label = get_bible_label(next_ch_idx, chunk_size)
 
                 target_item["task"] = f"성경 묵상: {next_label}"
@@ -1803,9 +1814,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if is_trans_task and target_item["done"]:
                 curr_v_idx = target_item.get("transcription_v_idx", 0)
-                chunk_size = topic_data.get("transcription_chunk", 10)
+                chunk_size = target_item.get("transcription_chunk", topic_data.get("transcription_chunk", 10))
                 next_v_idx = (curr_v_idx + chunk_size) % len(ALL_BIBLE_VERSES)
-                topic_data["transcription_v_idx"] = next_v_idx
                 next_label = get_transcription_label(next_v_idx, chunk_size)
 
                 target_item["task"] = f"성경 필사: {next_label}"
@@ -1824,7 +1834,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 # ---------------------------------------------------------
-# 스케줄러 Jobs (일요일 새벽 5시 주간 정산 적용)
+# 스케줄러 Jobs 
 # ---------------------------------------------------------
 async def morning_reminder_job(context: ContextTypes.DEFAULT_TYPE):
     for key, data in topic_plans.items():
@@ -1973,48 +1983,6 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
                         "date": today_str,
                         "delay_count": 0
                     })
-
-        bible_plans = [p for p in plans if p.get("is_bible") == True]
-        if bible_plans:
-            last_bible = bible_plans[-1]
-            if last_bible["done"]:
-                curr_ch_idx = data.get("bible_ch_idx", 0)
-                chunk_size = data.get("bible_chunk", 4)
-                
-                next_ch_idx = (curr_ch_idx + chunk_size) % len(ALL_BIBLE_CHAPTERS)
-                data["bible_ch_idx"] = next_ch_idx
-                next_label = get_bible_label(next_ch_idx, chunk_size)
-
-                plans.append({
-                    "task": f"성경 묵상: {next_label}",
-                    "category": "[매일]",
-                    "done": False,
-                    "date": today_str,
-                    "is_bible": True,
-                    "bible_ch_idx": next_ch_idx,
-                    "delay_count": 0
-                })
-
-        transcription_plans = [p for p in plans if p.get("is_transcription") == True]
-        if transcription_plans:
-            last_trans = transcription_plans[-1]
-            if last_trans["done"]:
-                curr_v_idx = data.get("transcription_v_idx", 0)
-                chunk_size = data.get("transcription_chunk", 10)
-                
-                next_v_idx = (curr_v_idx + chunk_size) % len(ALL_BIBLE_VERSES)
-                data["transcription_v_idx"] = next_v_idx
-                next_label = get_transcription_label(next_v_idx, chunk_size)
-
-                plans.append({
-                    "task": f"성경 필사: {next_label}",
-                    "category": "[매일]",
-                    "done": False,
-                    "date": today_str,
-                    "is_transcription": True,
-                    "transcription_v_idx": next_v_idx,
-                    "delay_count": 0
-                })
         
         save_data_to_supabase(key, topic_plans[key])
 
