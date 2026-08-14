@@ -46,13 +46,14 @@ if SUPABASE_URL and SUPABASE_KEY:
         print(f"🌧️ Supabase 연결 실패: {e}")
 
 # ---------------------------------------------------------
-# 💾 Supabase 연동 HELPER 함수 및 새벽 5시 기준 날짜 함수
+# 💾 Supabase 연동 HELPER 함수 및 새벽 2시 기준 날짜 함수
 # ---------------------------------------------------------
 topic_plans = {}
 
 def get_logical_now():
     now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
-    if now.hour < 5:
+    # 하루의 기준을 새벽 2시로 설정
+    if now.hour < 2:
         now = now - datetime.timedelta(days=1)
     return now
 
@@ -251,7 +252,7 @@ WEEKLY_TASK_PROMPT_MSG = (
     "📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
     "이번 주 특정 요일에 정기적으로 진행할 공부나 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
     "**💡 작성 예시:**\n"
-    "`/wt` 입력 후 아래 줄에 적어주시면 해당 요일 새벽 5시에 자동으로 오늘 할 일로 추가됩니다.\n"
+    "`/wt` 입력 후 아래 줄에 적어주시면 해당 요일 00시에 자동으로 오늘 할 일로 추가됩니다.\n"
     "```\n"
     "/wt\n"
     "월: 과제 제출, 데이터 분석 강의\n"
@@ -1281,15 +1282,17 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         topic_plans[key] = default_topic_data(user_name)
 
     pool = topic_plans[key].get("task_pool", [])
-    if not pool:
-        await update.message.reply_text("🍃 마스터 태스크 풀이 비어있습니다. `/p [카테고리] 할일` 로 채워보세요.")
+    valid_pool = [t for t in pool if not t.get("picked")]
+
+    if not valid_pool:
+        await update.message.reply_text("🍃 인양할 태스크가 없습니다. `/p [카테고리] 할일` 로 채워보세요.")
         return
 
     grouped = {}
     for idx, item in enumerate(pool):
+        if item.get("picked"): continue
         cat = item["category"]
-        if cat not in grouped:
-            grouped[cat] = []
+        if cat not in grouped: grouped[cat] = []
         grouped[cat].append((idx, item["task"]))
 
     keyboard = []
@@ -1298,8 +1301,10 @@ async def pick_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for idx, task_name in items:
             keyboard.append([InlineKeyboardButton(f"  ☁️ {task_name}", callback_data=f"pick_{idx}")])
     
+    keyboard.append([InlineKeyboardButton("🏁 인양 완료", callback_data="pick_complete")])
+    
     await update.message.reply_text(
-        "📂 **[마스터 태스크 풀 - 잠자는 항목들]**\n오늘 정원에 심을 씨앗을 1개씩 선택해 주세요!",
+        "📂 **[마스터 태스크 풀 - 잠자는 항목들]**\n오늘 진행할 항목들을 선택한 뒤 `[🏁 인양 완료]`를 눌러주세요!",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -1321,9 +1326,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if key in topic_plans and topic_plans[key].get("disabled", False):
         return
 
-    # 💡 야간 모드 ForceReply(강제 답장)를 통한 삭제 처리
+    # 💡 ForceReply(강제 답장) 처리
     if update.message.reply_to_message and update.message.reply_to_message.text:
         replied_text = update.message.reply_to_message.text
+        
+        # 1. 야간 모드 삭제 사유 처리
         if "삭제 사유를 10자 이상" in replied_text:
             match = re.search(r"🗑️ \[(.*?)\] 삭제 사유를", replied_text)
             if match:
@@ -1365,6 +1372,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await update.message.reply_text(f"🌧️ `{task_name}` 항목을 찾을 수 없거나 이미 완료/삭제되었습니다.")
                 return
+
+        # 2. 주간 미완료 일괄 삭제 사유 처리
+        if "주간 미완료 항목 일괄 삭제" in replied_text:
+            reason = text.strip()
+            if len(reason) < 10:
+                await update.message.reply_text("🚨 취소 사유는 10자 이상 작성해 주세요. (위 봇의 질문 메시지에 다시 답장해 주세요!)")
+                return
+            
+            plans = topic_plans[key].get("plans", [])
+            new_plans = [p for p in plans if p.get("done") or p.get("is_bible") or p.get("is_transcription") or p.get("hidden")]
+            topic_plans[key]["plans"] = new_plans
+            save_data_to_supabase(key, topic_plans[key])
+            
+            await update.message.reply_text(f"➖ 사유 승인됨: '{reason}'\n**이번 주 미완료 항목들이 모두 삭제(초기화)되었습니다.**", parse_mode="Markdown")
+            return
 
     if text.startswith("질문:") or text.startswith("질문 "):
         question_text = re.sub(r"^질문[:\s]*", "", text).strip()
@@ -1499,21 +1521,17 @@ async def edit_routine(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     else:
-        await update.message.reply_text(f"🌧️ `{old_name}` 항목을 찾을 수 없습니다.", parse_mode="Markdown")
+        await update.message.reply_text(f"🌧️ `{old_name}` 항목을 찾을 수 없거나 루틴이 아닙니다.", parse_mode="Markdown")
 
 async def reset_plans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = get_topic_key(update)
-    data = topic_plans.get(key, {})
-    plans = data.get("plans", [])
-
-    if not plans:
-        await update.message.reply_text("🍃 초기화할 공부 계획이 없습니다.")
-        return
-
+    
     keyboard = [
         [InlineKeyboardButton("📋 일반 할 일만 초기화", callback_data="reset_tasks")],
         [InlineKeyboardButton("🔄 [매일] 루틴만 초기화", callback_data="reset_routines")],
-        [InlineKeyboardButton("➖ 전체 초기화", callback_data="reset_all")],
+        [InlineKeyboardButton("🎯 디데이 전체 초기화", callback_data="reset_ddays")],
+        [InlineKeyboardButton("📂 태스크 풀 전체 초기화", callback_data="reset_pool")],
+        [InlineKeyboardButton("➖ 전체 초기화 (할일+루틴)", callback_data="reset_all")],
         [InlineKeyboardButton("🌧️ 취소", callback_data="reset_cancel")],
     ]
     await update.message.reply_text("➖ **초기화 옵션을 선택해 주세요:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -1562,32 +1580,71 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
         return
 
+    # === [태스크 풀 다중 인양 로직] ===
     if data.startswith("pick_"):
-        idx = int(data.split("_")[1])
         topic_data = topic_plans.get(key, {})
         pool = topic_data.get("task_pool", [])
         plans = topic_data.get("plans", [])
         
-        if 0 <= idx < len(pool):
-            task = pool.pop(idx)
-            task["done"] = False
-            task["date"] = get_logical_now().strftime("%m/%d")
-            task["delay_count"] = 0
-            plans.append(task)
+        if data == "pick_complete":
+            topic_data["task_pool"] = [t for t in pool if not t.get("picked")]
             save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text(f"🌱 **`{task['category']} {task['task']}`** 항목이 '오늘 할 일'로 활성화되었습니다!\n계속해서 다른 항목도 불러오시려면 `/pk`를 다시 입력해 주세요.", parse_mode="Markdown")
+            await query.edit_message_text("🌱 **선택하신 태스크들이 오늘의 할 일로 성공적으로 인양되었습니다!**", parse_mode="Markdown")
+            return
+            
+        idx = int(data.split("_")[1])
+        if 0 <= idx < len(pool):
+            task = pool[idx]
+            if not task.get("picked"):
+                task["picked"] = True
+                new_task = task.copy()
+                new_task.pop("picked", None)
+                new_task["done"] = False
+                new_task["date"] = get_logical_now().strftime("%m/%d")
+                new_task["delay_count"] = 0
+                plans.append(new_task)
+                save_data_to_supabase(key, topic_plans[key])
+        
+        grouped = {}
+        for i, item in enumerate(pool):
+            if item.get("picked"): continue
+            cat = item["category"]
+            if cat not in grouped: grouped[cat] = []
+            grouped[cat].append((i, item["task"]))
+            
+        keyboard = []
+        for cat, items in grouped.items():
+            keyboard.append([InlineKeyboardButton(f"📁 {cat}", callback_data="noop")])
+            for i, task_name in items:
+                keyboard.append([InlineKeyboardButton(f"  ☁️ {task_name}", callback_data=f"pick_{i}")])
+        keyboard.append([InlineKeyboardButton("🏁 인양 완료", callback_data="pick_complete")])
+        
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
+    # === [주간 리포트 이월/삭제 로직] ===
     if data.startswith("weekly_opt_"):
-        await query.answer()
-        if data == "weekly_opt_clear":
-            if key in topic_plans:
-                plans = topic_plans[key].get("plans", [])
-                topic_plans[key]["plans"] = [p for p in plans if p["done"] or p.get("is_bible") or p.get("is_transcription")]
-                save_data_to_supabase(key, topic_plans[key])
-            await query.edit_message_text("➖ **이번 주 미완료 항목들이 깔끔하게 정리되었습니다!**", parse_mode="Markdown")
-        elif data == "weekly_opt_rollover":
-            await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월됩니다!**", parse_mode="Markdown")
+        if data == "weekly_opt_rollover":
+            plans = topic_plans.get(key, {}).get("plans", [])
+            today_str = get_logical_now().strftime("%m/%d")
+            for p in plans:
+                if not p["done"] and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden"):
+                    p["date"] = today_str
+            save_data_to_supabase(key, topic_plans[key])
+            await query.edit_message_text("➡️ **미완료된 항목들이 다음 주로 차곡차곡 이월되었습니다! (날짜 갱신 완료)**", parse_mode="Markdown")
+        
+        elif data == "weekly_opt_clear":
+            plans = topic_plans.get(key, {}).get("plans", [])
+            uncompleted = [p["task"] for p in plans if not p["done"] and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden")]
+            task_list_str = "\n".join([f"• {t}" for t in uncompleted])
+            
+            await context.bot.send_message(
+                chat_id=chat_id,
+                message_thread_id=thread_id if thread_id != 0 else None,
+                text=f"🗑️ **주간 미완료 항목 일괄 삭제**\n아래 항목들을 삭제하시려면 10자 이상의 취소 사유를 답장으로 남겨주세요.\n\n**[삭제 대상]**\n{task_list_str}",
+                reply_markup=ForceReply(selective=True)
+            )
+            await query.answer()
         return
 
     if data.startswith("bctoggle_"):
@@ -1633,6 +1690,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
         return
 
+    # === [리셋 메뉴 로직] ===
     if data.startswith("reset_"):
         await query.answer()
         if data == "reset_tasks":
@@ -1647,6 +1705,16 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 topic_plans[key]["plans"] = [p for p in plans if "[매일]" not in p.get("category", "")]
                 save_data_to_supabase(key, topic_plans[key])
             await query.edit_message_text("➖ **`[매일]` 루틴만 초기화되었습니다.**", parse_mode="Markdown")
+        elif data == "reset_ddays":
+            if key in topic_plans:
+                topic_plans[key]["ddays"] = {}
+                save_data_to_supabase(key, topic_plans[key])
+            await query.edit_message_text("➖ **디데이가 모두 초기화되었습니다.**", parse_mode="Markdown")
+        elif data == "reset_pool":
+            if key in topic_plans:
+                topic_plans[key]["task_pool"] = []
+                save_data_to_supabase(key, topic_plans[key])
+            await query.edit_message_text("➖ **마스터 태스크 풀이 모두 비워졌습니다.**", parse_mode="Markdown")
         elif data == "reset_all":
             if key in topic_plans:
                 topic_plans[key]["plans"] = []
@@ -1904,6 +1972,12 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 async def sunday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
+    # 새로운 한 주(일~토) 날짜 계산
+    sun = now
+    sat = sun + datetime.timedelta(days=6)
+    next_week_str = f"{sun.strftime('%m/%d')} ~ {sat.strftime('%m/%d')}"
+
     for key, data in topic_plans.items():
         if data.get("disabled", False):
             continue
@@ -1922,43 +1996,76 @@ async def sunday_weekly_reminder(context: ContextTypes.DEFAULT_TYPE):
         if uncompleted_count > 0:
             msg += "\n\n💡 **이번 주 미완료 항목 처리 방법을 선택해 주세요:**"
             keyboard = [
-                [InlineKeyboardButton("➖ 이번 주 미완료 항목 삭제 (초기화)", callback_data="weekly_opt_clear")],
                 [InlineKeyboardButton("➡️ 미완료 항목 다음 주로 이월", callback_data="weekly_opt_rollover")],
+                [InlineKeyboardButton("➖ 미완료 항목 일괄 삭제", callback_data="weekly_opt_clear")],
             ]
         
         reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+        
+        prompt_msg = (
+            f"📝 **[새로운 한 주, 주간 과제 설정]**\n\n"
+            f"이번 주 ({next_week_str}) 특정 요일에 진행할 과제가 있다면 아래 명령어로 등록해 보세요!\n\n"
+            "💡 작성 예시: `/wt` 입력 후 다음 줄에 `월: 과제 제출`"
+        )
 
         try:
-            await context.bot.send_message(
+            report_msg = await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id if thread_id != 0 else None,
                 text=msg,
                 reply_markup=reply_markup,
                 parse_mode="Markdown",
             )
+            # 리포트 메시지에 답장(Reply) 형태로 주간 과제 안내 발송
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id if thread_id != 0 else None,
-                text=WEEKLY_TASK_PROMPT_MSG,
+                text=prompt_msg,
+                reply_to_message_id=report_msg.message_id,
                 parse_mode="Markdown",
             )
         except Exception:
             pass
 
-async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
-    now = get_logical_now()
+# 00:00 자정 스케줄러: 요일별 과제만 추가
+async def midnight_weekly_task_job(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now(pytz.timezone("Asia/Seoul"))
     today_str = now.strftime("%m/%d")
     today_weekday_kor = WEEKDAY_KOR[now.weekday()]
     
     for key, data in topic_plans.items():
-        if data.get("disabled", False):
-            continue
+        if data.get("disabled", False): continue
+        plans = data.get("plans", [])
+        weekly_tasks_dict = data.get("weekly_tasks", {})
+        
+        if today_weekday_kor in weekly_tasks_dict:
+            for task_name in weekly_tasks_dict[today_weekday_kor]:
+                already_exists = any(p["task"] == task_name and p.get("date") == today_str for p in plans)
+                if not already_exists:
+                    plans.append({
+                        "task": task_name,
+                        "category": f"[{today_weekday_kor}요일 과제]",
+                        "done": False,
+                        "date": today_str,
+                        "delay_count": 0
+                    })
+            save_data_to_supabase(key, topic_plans[key])
+
+# 02:00 스케줄러: 지연 카운트 증가 및 매일 루틴 리셋
+async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
+    now = get_logical_now()
+    today_str = now.strftime("%m/%d")
+    
+    for key, data in topic_plans.items():
+        if data.get("disabled", False): continue
         plans = data.get("plans", [])
         
+        # 지연 카운트 증가
         for p in plans:
             if not p.get("done") and "[매일]" not in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription") and not p.get("hidden"):
                 p["delay_count"] = p.get("delay_count", 0) + 1
 
+        # 루틴 재생성
         routine_names = list(dict.fromkeys([
             p["task"] for p in plans 
             if "[매일]" in p.get("category", "") and not p.get("is_bible") and not p.get("is_transcription")
@@ -1971,28 +2078,8 @@ async def daily_routine_reset_job(context: ContextTypes.DEFAULT_TYPE):
             )
             if not already_exists:
                 plans.append({
-                    "task": task_name,
-                    "category": "[매일]",
-                    "done": False,
-                    "date": today_str,
-                    "delay_count": 0
+                    "task": task_name, "category": "[매일]", "done": False, "date": today_str, "delay_count": 0
                 })
-
-        weekly_tasks_dict = data.get("weekly_tasks", {})
-        if today_weekday_kor in weekly_tasks_dict:
-            for task_name in weekly_tasks_dict[today_weekday_kor]:
-                already_exists = any(
-                    p["task"] == task_name and p.get("date") == today_str
-                    for p in plans
-                )
-                if not already_exists:
-                    plans.append({
-                        "task": task_name,
-                        "category": f"[{today_weekday_kor}요일 과제]",
-                        "done": False,
-                        "date": today_str,
-                        "delay_count": 0
-                    })
         
         save_data_to_supabase(key, topic_plans[key])
 
@@ -2126,12 +2213,18 @@ if __name__ == "__main__":
     job_queue = app.job_queue
     tz = pytz.timezone("Asia/Seoul")
 
-    reset_time = datetime.time(hour=5, minute=0, second=0, tzinfo=tz)
+    midnight_time = datetime.time(hour=0, minute=0, second=0, tzinfo=tz) # 00:00 KST
+    reset_time = datetime.time(hour=2, minute=0, second=0, tzinfo=tz)    # 02:00 KST
     morning_time = datetime.time(hour=8, minute=0, second=0, tzinfo=tz)
 
     job_queue.run_daily(morning_reminder_job, time=morning_time)
-    job_queue.run_daily(sunday_weekly_reminder, time=reset_time, days=(6,))
+    
+    # 스케줄러 분리 적용 (요일별 과제는 자정에 추가, 리셋 및 주간 보고서는 새벽 2시)
+    job_queue.run_daily(midnight_weekly_task_job, time=midnight_time)
     job_queue.run_daily(daily_routine_reset_job, time=reset_time)
+    
+    # KST 기준 일요일 02시에 주간 리포트 발송 및 자동 이월 작업 (days=(6,) == 일요일)
+    job_queue.run_daily(sunday_weekly_reminder, time=reset_time, days=(6,))
     job_queue.run_daily(sunday_rollover_job, time=reset_time, days=(6,))
     
     job_queue.run_repeating(custom_time_reminder_job, interval=60, first=10)
