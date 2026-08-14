@@ -358,7 +358,8 @@ def default_topic_data(user_name):
         "transcription_chunk": 10,
         "weekly_tasks": {},
         "notify_time": None,
-        "disabled": False
+        "disabled": False,
+        "last_night_msg_id": None
     }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1400,10 +1401,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 💡 야간 모드 ForceReply(강제 답장)를 통한 삭제 처리
     if update.message.reply_to_message and update.message.reply_to_message.text:
         replied_text = update.message.reply_to_message.text
-        if "이곳에 취소 사유(10자 이상)를" in replied_text:
-            match = re.search(r"🗑️ `(.*?)`을\(를\) 삭제합니다", replied_text)
+        if "삭제 사유를 10자 이상" in replied_text:
+            match = re.search(r"🗑️ \[(.*?)\] 삭제 사유를", replied_text)
             if match:
-                task_name = match.group(1)
+                task_name = match.group(1).strip()
                 reason = text.strip()
                 
                 if len(reason) < 10:
@@ -1420,12 +1421,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if target_idx != -1:
                     plans.pop(target_idx)
                     save_data_to_supabase(key, topic_plans[key])
-                    plan_text, reply_markup = build_plan_view(key, is_night_mode=True)
-                    await update.message.reply_text(
-                        f"➖ 사유 승인됨: '{reason}'\n**`{task_name}` 항목이 삭제되었습니다.**\n\n-------------------------\n{plan_text}",
-                        reply_markup=reply_markup,
-                        parse_mode="Markdown"
-                    )
+                    
+                    last_msg_id = topic_plans[key].get("last_night_msg_id")
+                    if last_msg_id:
+                        plan_text, reply_markup = build_plan_view(key, is_night_mode=True)
+                        notify_time = topic_plans[key].get("notify_time", "")
+                        header_time = f" - {notify_time}" if notify_time else ""
+                        header = f"🌙 **[야간 정원 점검{header_time}]**\n\n잠시 하던 일을 멈추고 오늘의 달성 현황을 점검해 보세요!\n\n"
+                        text_instant = f"{header}-------------------------\n{plan_text}"
+                        try:
+                            await context.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=last_msg_id,
+                                text=text_instant,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown"
+                            )
+                        except Exception as e:
+                            pass
                 else:
                     await update.message.reply_text(f"🌧️ `{task_name}` 항목을 찾을 수 없거나 이미 완료/삭제되었습니다.")
                 return
@@ -1614,12 +1627,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if 0 <= idx < len(plans):
             task_name = plans[idx]["task"]
+            topic_data["last_night_msg_id"] = query.message.message_id
+            save_data_to_supabase(key, topic_data)
+
             await context.bot.send_message(
                 chat_id=chat_id,
                 message_thread_id=thread_id if thread_id != 0 else None,
-                text=f"🗑️ `{task_name}`을(를) 삭제합니다.\n이곳에 취소 사유(10자 이상)를 답장(Reply)으로 입력해 주세요.",
-                reply_markup=ForceReply(selective=True),
-                parse_mode="Markdown"
+                text=f"🗑️ [{task_name}] 삭제 사유를 10자 이상 작성해 주세요.",
+                reply_markup=ForceReply(selective=True)
             )
         await query.answer()
         return
@@ -1953,13 +1968,15 @@ async def custom_time_reminder_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
             try:
-                await context.bot.send_message(
+                sent_msg = await context.bot.send_message(
                     chat_id=chat_id,
                     message_thread_id=thread_id if thread_id != 0 else None,
                     text=msg,
                     reply_markup=reply_markup,
                     parse_mode="Markdown"
                 )
+                topic_plans[key]["last_night_msg_id"] = sent_msg.message_id
+                save_data_to_supabase(key, topic_plans[key])
             except Exception as e:
                 pass
 
