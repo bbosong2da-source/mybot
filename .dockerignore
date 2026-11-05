@@ -1,0 +1,5 @@
+tests/
+pytest.ini
+.git
+*.zip
+__pycache__/
