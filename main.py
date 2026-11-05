@@ -9,7 +9,7 @@ from telegram.constants import ParseMode
 from telegram.ext import (ApplicationBuilder, CallbackQueryHandler, CommandHandler, Defaults,
                           MessageHandler, filters)
 
-from bot import admin, callbacks, handlers, jobs
+from bot import admin, callbacks, handlers, jobs, quiz_handlers
 from bot.config import (ADMIN_ID, BOT_TOKEN, MORNING_HOUR, PORT, SUPABASE_KEY, SUPABASE_URL, TZ)
 from bot.storage import MemoryRepo, SupabaseRepo
 
@@ -22,6 +22,7 @@ USER_COMMANDS = [
     BotCommand("r", "루틴 관리 (/r 월수금 운동)"),
     BotCommand("w", "주간 리포트"),
     BotCommand("t", "밤 점검 시각 (/t 22:00, /t off)"),
+    BotCommand("q", "성구 퀴즈 시간 (/q 13-22, /q off)"),
     BotCommand("start", "사용 안내"),
     BotCommand("off", "이 방에서 봇 끄기"),
     BotCommand("on", "이 방에서 봇 켜기"),
@@ -30,6 +31,9 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("bc", "[관리자] 공지 과제 보내기"),
     BotCommand("bcr", "[관리자] 공지 결과"),
     BotCommand("re", "[관리자] 답변 보내기"),
+    BotCommand("qa", "[관리자] 성구 등록"),
+    BotCommand("qv", "[관리자] 성구 목록"),
+    BotCommand("qd", "[관리자] 성구 삭제"),
 ]
 
 
@@ -87,9 +91,14 @@ def build_app():
     cmd(["bc", "broadcast"], admin.cmd_broadcast)
     cmd(["bcr", "broadcast_report"], admin.cmd_broadcast_report)
     cmd(["re", "reply"], admin.cmd_reply)
+    cmd(["q", "quiz"], quiz_handlers.cmd_quiz)
+    cmd(["qa"], quiz_handlers.cmd_quiz_add)
+    cmd(["qv"], quiz_handlers.cmd_quiz_list)
+    cmd(["qd"], quiz_handlers.cmd_quiz_delete)
 
     app.add_handler(CallbackQueryHandler(callbacks.on_button))
     app.add_handler(MessageHandler(filters.StatusUpdate.FORUM_TOPIC_EDITED, handlers.handle_topic_edited))
+    app.add_handler(MessageHandler(filters.Document.ALL, quiz_handlers.on_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     app.add_error_handler(on_error)
 

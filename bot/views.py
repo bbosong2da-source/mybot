@@ -14,6 +14,7 @@ callback_data 규칙 (64바이트 제한, 항목은 인덱스가 아닌 DB id로
   rn:{id}            루틴 이름 변경
   rx:{id} / ry:{id}  루틴 삭제 확인 / 삭제 실행
   bc:{bid}:{idx}     공지 과제 토글
+  qz:{qid}:{idx}     성구 퀴즈 답 선택 / qz:i 퀴즈 루틴 안내
 """
 from __future__ import annotations
 
@@ -54,11 +55,30 @@ def _routine_label(r) -> str:
     return _cut(f"{icon} {r.routine['title']}{fire}")
 
 
+def _quiz_label(q) -> str:
+    icon = "🍋" if q.done else "🥚"
+    fire = f" 🔥{q.streak}" if q.streak >= 2 else ""
+    return f"{icon} 📜 성구 퀴즈 {q.answered}/{q.target}{fire}"
+
+
+def _routine_rows(view: TodayView, mode: str, pending_only: bool = False):
+    items = [r for r in view.routines if not (pending_only and r.done_today)]
+    show_quiz = view.quiz is not None and not (pending_only and view.quiz.done)
+    rows = []
+    if items or show_quiz:
+        rows.append([Btn("🐦‍⬛ 남은 루틴" if pending_only else "🐦‍⬛ 오늘의 루틴", callback_data=NOOP)])
+    rows += [[Btn(_routine_label(r), callback_data=f"r:{mode}:{r.routine['id']}")] for r in items]
+    if show_quiz:
+        rows.append([Btn(_quiz_label(view.quiz), callback_data="qz:i")])
+    return rows
+
+
 def _stats_line(view: TodayView) -> str:
     parts = []
-    if view.routines:
-        done = sum(r.done_today for r in view.routines)
-        parts.append(f"🐦‍⬛ 루틴 {done}/{len(view.routines)}")
+    total = len(view.routines) + (1 if view.quiz else 0)
+    if total:
+        done = sum(r.done_today for r in view.routines) + (1 if view.quiz and view.quiz.done else 0)
+        parts.append(f"🐦‍⬛ 루틴 {done}/{total}")
     items = view.task_items
     if items:
         done = sum(i.done for i in items)
@@ -87,7 +107,7 @@ def render_today(view: TodayView, mode: str = "l", intro: str | None = None):
 
     lines = [intro, ""] if intro else []
     lines.append(f"🌿 <b>{fmt_long(view.today)} 오늘의 정원</b>")
-    if view.routines or view.categories:
+    if view.has_today:
         lines.append(_stats_line(view))
         if view.all_clear:
             lines += ["", "🌾 <b>오늘의 농사 완료! ALL CLEAR!</b> 수고 많으셨어요 🐦‍⬛"]
@@ -98,10 +118,7 @@ def render_today(view: TodayView, mode: str = "l", intro: str | None = None):
                   "채팅창에 할 일을 적거나 <code>/r 루틴</code>으로 루틴을 만들어 보세요."]
     text = "\n".join(lines) + _upcoming_text(view)
 
-    rows = []
-    if view.routines:
-        rows.append([Btn("🐦‍⬛ 오늘의 루틴", callback_data=NOOP)])
-        rows += [[Btn(_routine_label(r), callback_data=f"r:l:{r.routine['id']}")] for r in view.routines]
+    rows = _routine_rows(view, "l")
     shown = 0
     for cat, items in view.categories:
         rows.append([Btn(f"☁️ {_cut(cat, 40)}", callback_data=NOOP)])
@@ -120,7 +137,7 @@ def render_today(view: TodayView, mode: str = "l", intro: str | None = None):
 def _render_night(view: TodayView, intro: str | None):
     lines = [intro, ""] if intro else []
     lines.append(f"🌙 <b>밤 점검 · {fmt_long(view.today)}</b>")
-    if view.routines or view.categories:
+    if view.has_today:
         lines.append(_stats_line(view))
     open_tasks = view.open_tasks
     if view.all_clear:
@@ -133,11 +150,7 @@ def _render_night(view: TodayView, intro: str | None):
         lines += ["", "남은 루틴을 확인해 보세요!"]
     text = "\n".join(lines) + _upcoming_text(view)
 
-    rows = []
-    pending_routines = [r for r in view.routines if not r.done_today]
-    if pending_routines:
-        rows.append([Btn("🐦‍⬛ 남은 루틴", callback_data=NOOP)])
-        rows += [[Btn(_routine_label(r), callback_data=f"r:n:{r.routine['id']}")] for r in pending_routines]
+    rows = _routine_rows(view, "n", pending_only=True)
     for item in open_tasks[:MAX_NIGHT_TASKS]:
         tid = item.task["id"]
         rows.append([Btn(_task_label(item), callback_data=NOOP)])
@@ -249,3 +262,35 @@ def render_broadcast(b: dict, checked: set[int]):
     rows = [[Btn(_cut(f"{'🐦‍⬛' if i in checked else '🥚'} {item}"), callback_data=f"bc:{b['id']}:{i}")]
             for i, item in enumerate(items)]
     return text, _markup(rows)
+
+
+# ---------------------------------------------------------------------------
+def render_quiz(q: dict, verse: dict | None = None, today_progress: str | None = None):
+    """q: quiz_questions 행. 아직 안 풀었으면 보기 버튼, 풀었으면 정답과 본문."""
+    hour = f" · {q['hour']}시" if q.get("hour") is not None else ""
+    if q["kind"] == "ref2core":
+        ask = f"<b>{escape(q['ref'])}</b>의 핵심 내용은?"
+    else:
+        ask = f"“{escape(q['prompt'])}”\n\n이 말씀은 어디에 있을까요?"
+    lines = [f"📜 <b>성구 퀴즈</b>{hour}", "", ask]
+
+    answered = q.get("answer_idx")
+    if answered is None:
+        rows = [[Btn(_cut(f"{'①②③④'[i]} {opt}", 64), callback_data=f"qz:{q['id']}:{i}")]
+                for i, opt in enumerate(q["options"])]
+        return "\n".join(lines), _markup(rows)
+
+    correct = q["correct_idx"]
+    if answered == correct:
+        lines += ["", "⭕ <b>정답이에요!</b>"]
+    else:
+        lines += ["", f"❌ 아쉬워요! 정답은 <b>{escape(q['options'][correct])}</b>"]
+    if verse:
+        lines += ["", f"📖 <b>{escape(verse['ref'])}</b> {escape(verse.get('body') or verse['core'])}"]
+    if today_progress:
+        lines += ["", today_progress]
+    rows = []
+    for i, opt in enumerate(q["options"]):
+        mark = "✅" if i == correct else ("❌" if i == answered else "▫️")
+        rows.append([Btn(_cut(f"{mark} {opt}", 64), callback_data=NOOP)])
+    return "\n".join(lines), _markup(rows)

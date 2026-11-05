@@ -92,8 +92,33 @@ async def load_state(r, space_id: int, today: dt.date):
     return tasks, routines, logs
 
 
-async def load_today(r, space_id: int, today: dt.date) -> TodayView:
-    return build_today(*await load_state(r, space_id, today), today)
+async def load_quiz_status(r, space: dict, today: dt.date):
+    """오늘의 루틴으로 보여 줄 성구 퀴즈 상태. 퀴즈 테이블이 아직 없거나 오류가 나도
+    할 일 목록은 보여야 하므로 실패하면 None."""
+    from . import dates
+    from .quiz import build_status
+    try:
+        since = today - dt.timedelta(days=90)
+        qs, count = await asyncio.gather(r.questions_since(space["id"], since), r.count_verses())
+        history: dict[dt.date, tuple[int, int]] = {}
+        for q in qs:
+            issued, answered = history.get(q["quiz_date"], (0, 0))
+            history[q["quiz_date"]] = (issued + 1, answered + (q["answer_idx"] is not None))
+        today_qs = [q for q in qs if q["quiz_date"] == today]
+        now = dates.now()
+        if now.date() != today:   # 테스트 등에서 날짜만 바꾼 경우: 하루가 끝난 것으로 본다
+            now = dt.datetime.combine(today, dt.time(23, 59))
+        return build_status(space, count, today_qs, history, now, since)
+    except Exception as e:
+        log.warning("퀴즈 상태 불러오기 실패 space=%s: %s", space.get("id"), e)
+        return None
+
+
+async def load_today(r, space: dict, today: dt.date, state=None) -> TodayView:
+    state = state or await load_state(r, space["id"], today)
+    view = build_today(*state, today)
+    view.quiz = await load_quiz_status(r, space, today)
+    return view
 
 
 async def send_to_space(bot, space: dict, text: str, markup=None, **kwargs):

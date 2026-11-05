@@ -27,6 +27,7 @@ WELCOME = (
     "/r 루틴 관리 — <code>/r 월수금 운동</code>으로 추가\n"
     "/w 주간 리포트 (일~토)\n"
     "/t 밤 점검 시각 — <code>/t 22:30</code>, 끄기 <code>/t off</code>\n"
+    "/q 성구 퀴즈 시간 — <code>/q 9-18</code>, 끄기 <code>/q off</code>\n"
     "/off · /on 이 방에서 봇 끄기·켜기\n\n"
     "💬 관리자에게 질문하려면 <code>질문: 내용</code>\n\n"
     "🌱 배움의 씨앗을 심고 촘촘하게 가꿔 보세요!"
@@ -52,7 +53,7 @@ async def cmd_start(update: Update, context):
 
 async def cmd_list(update: Update, context):
     space = await ensure_space(update, context)
-    view = await load_today(repo(context), space["id"], dates.today())
+    view = await load_today(repo(context), space, dates.today())
     text, markup = render_today(view, "l")
     await update.effective_message.reply_text(text, reply_markup=markup)
 
@@ -205,7 +206,7 @@ async def _add_tasks(update: Update, context, space: dict, text: str):
         lines.append(f"📅 {fmt_short(t['due_date'])} {escape(t['title'])} → 예정 목록")
     lines += errors
 
-    view = await load_today(r, space["id"], today)
+    view = await load_today(r, space, today)
     body, markup = render_today(view, "l", intro="\n".join(lines))
 
     undo = [[Btn(f"↩️ 오늘 할 일로: {t['title'][:30]}", callback_data=f"u:{t['id']}")] for t in future[:5]]
@@ -237,7 +238,7 @@ async def _handle_marker_reply(update, context, space, kind: str, ident: int, te
             return True
         await r.update_task(space["id"], ident, {"title": new_title, "raw_text": None})
         intro = f"✏️ 이름을 바꿨어요: <b>{escape(task['title'])}</b> → <b>{escape(new_title)}</b>"
-        view = await load_today(r, space["id"], dates.today())
+        view = await load_today(r, space, dates.today())
         body, markup = render_today(view, "l", intro=intro)
         await msg.reply_text(body, reply_markup=markup)
         return True
