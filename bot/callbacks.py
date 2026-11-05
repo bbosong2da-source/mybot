@@ -8,6 +8,7 @@ from html import escape
 from telegram import ForceReply, Update
 
 from . import dates
+from .quiz_handlers import on_quiz_button
 from .common import load_today, repo, safe_edit, send_to_space, space_of_query
 from .views import (render_broadcast, render_routine_delete_confirm, render_routine_detail,
                     render_routines, render_today)
@@ -37,7 +38,7 @@ async def on_button(update: Update, context):
 
 
 async def _rerender_today(query, context, space, mode: str, intro: str | None = None):
-    view = await load_today(repo(context), space["id"], dates.today())
+    view = await load_today(repo(context), space, dates.today())
     text, markup = render_today(view, mode, intro=intro)
     await safe_edit(query, text, markup)
 
@@ -247,4 +248,5 @@ _HANDLERS = {
     "e": _edit, "u": _undo_date,
     "rm": _rm, "rd": _rd, "rn": _rn, "rx": _rx, "ry": _ry,
     "bc": _bc,
+    "qz": on_quiz_button,
 }

@@ -77,3 +77,5 @@ alter table routine_logs      enable row level security;
 alter table broadcasts        enable row level security;
 alter table broadcast_targets enable row level security;
 alter table broadcast_checks  enable row level security;
+
+-- 성구 퀴즈 기능은 schema_quiz.sql 을 이어서 실행하세요.

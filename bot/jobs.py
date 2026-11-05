@@ -9,9 +9,10 @@ import asyncio
 import logging
 
 from . import dates
-from .common import load_state, repo, send_to_space
+from .common import load_state, load_today, repo, send_to_space
 from .config import WEEKLY_FALLBACK_TIME
-from .logic import build_today, build_week
+from .logic import build_week
+from .quiz_handlers import issue_due_quizzes
 from .views import render_today, render_week
 
 log = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ async def morning_job(context):
         if space.get("disabled"):
             continue
         try:
-            view = build_today(*await load_state(r, space["id"], today), today)
+            view = await load_today(r, space, today)
             if view.is_empty:
                 continue
             text, markup = render_today(view, "l", intro="☀️ <b>좋은 아침이에요!</b> 오늘의 씨앗을 뿌려 볼까요?")
@@ -36,7 +37,7 @@ async def morning_job(context):
 
 
 async def minute_job(context):
-    """매분 실행: 공간별 밤 점검 시각이 되면 밤 점검(토요일엔 주간 리포트도) 전송."""
+    """매분 실행: 성구 퀴즈 정각 출제 + 공간별 밤 점검(토요일엔 주간 리포트도) 전송."""
     r = repo(context)
     now = dates.now()
     hhmm = now.strftime("%H:%M")
@@ -47,7 +48,10 @@ async def minute_job(context):
     for mark in [m for m in sent if m[1] != today]:
         sent.discard(mark)
 
-    for space in await r.all_spaces():
+    spaces = await r.all_spaces()
+    await issue_due_quizzes(context, spaces, now, SEND_GAP)
+
+    for space in spaces:
         if space.get("disabled"):
             continue
         notify = space.get("notify_time")
@@ -62,7 +66,7 @@ async def minute_job(context):
         try:
             state = await load_state(r, space["id"], today)
             if night:
-                view = build_today(*state, today)
+                view = await load_today(r, space, today, state)
                 if not view.is_empty:
                     text, markup = render_today(view, "n")
                     await send_to_space(context.bot, space, text, markup)

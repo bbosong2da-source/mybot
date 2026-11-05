@@ -12,7 +12,7 @@ import asyncio
 import datetime as dt
 import itertools
 
-DATE_FIELDS = ("due_date", "done_at", "created_on", "log_date")
+DATE_FIELDS = ("due_date", "done_at", "created_on", "log_date", "quiz_date")
 
 
 def _to_py(row: dict) -> dict:
@@ -166,6 +166,57 @@ class SupabaseRepo:
                             .eq("broadcast_id", broadcast_id).eq("space_id", space_id)
                             .eq("item_idx", idx))
 
+    # --- 성구 퀴즈 ---------------------------------------------------------
+    async def list_verses(self) -> list[dict]:
+        return await self._run(lambda: self._t("verses").select("*").order("id"))
+
+    async def count_verses(self) -> int:
+        res = await asyncio.to_thread(
+            lambda: self._t("verses").select("id", count="exact").limit(1).execute())
+        return res.count or 0
+
+    async def upsert_verses(self, rows: list[dict]) -> None:
+        if rows:
+            await self._run(lambda: self._t("verses").upsert(rows, on_conflict="ref"))
+
+    async def delete_verse(self, ref: str) -> bool:
+        rows = await self._run(lambda: self._t("verses").delete().eq("ref", ref))
+        return bool(rows)
+
+    async def create_question(self, row: dict) -> dict | None:
+        """같은 공간·날짜·시간 문제가 이미 있으면 None."""
+        rows = await self._run(lambda: self._t("quiz_questions").upsert(
+            _to_db(row), on_conflict="space_id,quiz_date,hour", ignore_duplicates=True))
+        return rows[0] if rows else None
+
+    async def get_question(self, space_id: int, qid: int) -> dict | None:
+        rows = await self._run(lambda: self._t("quiz_questions").select("*")
+                               .eq("space_id", space_id).eq("id", qid))
+        return rows[0] if rows else None
+
+    async def questions_since(self, space_id: int, since: dt.date) -> list[dict]:
+        return await self._run(lambda: self._t("quiz_questions")
+                               .select("id,quiz_date,hour,verse_id,answer_idx")
+                               .eq("space_id", space_id).gte("quiz_date", since.isoformat())
+                               .order("id"))
+
+    async def answer_question(self, space_id: int, qid: int, idx: int, correct: bool) -> bool:
+        """아직 안 푼 문제일 때만 기록. 기록했으면 True (두 번 눌러도 한 번만 반영)."""
+        rows = await self._run(lambda: self._t("quiz_questions")
+                               .update({"answer_idx": idx, "correct": correct})
+                               .eq("space_id", space_id).eq("id", qid).is_("answer_idx", "null"))
+        return bool(rows)
+
+    async def verse_misses(self, space_id: int) -> dict[int, int]:
+        rows = await self._run(lambda: self._t("verse_misses").select("verse_id,misses")
+                               .eq("space_id", space_id))
+        return {r["verse_id"]: r["misses"] for r in rows}
+
+    async def set_verse_miss(self, space_id: int, verse_id: int, misses: int) -> None:
+        await self._run(lambda: self._t("verse_misses").upsert(
+            {"space_id": space_id, "verse_id": verse_id, "misses": misses},
+            on_conflict="space_id,verse_id"))
+
 
 class MemoryRepo:
     def __init__(self):
@@ -176,6 +227,9 @@ class MemoryRepo:
         self.broadcasts: dict[int, dict] = {}
         self.targets: set[tuple[int, int]] = set()
         self.checks: set[tuple[int, int, int]] = set()
+        self.verses: dict[int, dict] = {}
+        self.questions: dict[int, dict] = {}
+        self.misses: dict[tuple[int, int], int] = {}
         self._ids = itertools.count(1)
 
     def _new(self, row: dict, **defaults) -> dict:
@@ -189,7 +243,8 @@ class MemoryRepo:
         existing = await self.get_space(row["chat_id"], row["thread_id"])
         if existing:
             return existing
-        s = self._new(row, name=None, user_name=None, notify_time=None, disabled=False)
+        s = self._new(row, name=None, user_name=None, notify_time=None, disabled=False,
+                      quiz_hours="13-22")
         self.spaces[s["id"]] = s
         return dict(s)
 
@@ -292,3 +347,58 @@ class MemoryRepo:
 
     async def set_broadcast_check(self, broadcast_id, space_id, idx, done):
         (self.checks.add if done else self.checks.discard)((broadcast_id, space_id, idx))
+
+    # --- 성구 퀴즈 ---------------------------------------------------------
+    async def list_verses(self):
+        return [dict(v) for v in sorted(self.verses.values(), key=lambda v: v["id"])]
+
+    async def count_verses(self):
+        return len(self.verses)
+
+    async def upsert_verses(self, rows):
+        by_ref = {v["ref"]: v for v in self.verses.values()}
+        for row in rows:
+            if row["ref"] in by_ref:
+                by_ref[row["ref"]].update(row)
+            else:
+                v = self._new(row)
+                self.verses[v["id"]] = v
+
+    async def delete_verse(self, ref):
+        for vid, v in list(self.verses.items()):
+            if v["ref"] == ref:
+                del self.verses[vid]
+                for q in self.questions.values():   # on delete set null
+                    if q["verse_id"] == vid:
+                        q["verse_id"] = None
+                return True
+        return False
+
+    async def create_question(self, row):
+        for q in self.questions.values():
+            if (q["space_id"], q["quiz_date"], q["hour"]) == (row["space_id"], row["quiz_date"], row["hour"]):
+                return None
+        q = self._new(row, answer_idx=None, correct=None)
+        self.questions[q["id"]] = q
+        return dict(q)
+
+    async def get_question(self, space_id, qid):
+        q = self.questions.get(qid)
+        return dict(q) if q and q["space_id"] == space_id else None
+
+    async def questions_since(self, space_id, since):
+        return [dict(q) for q in sorted(self.questions.values(), key=lambda q: q["id"])
+                if q["space_id"] == space_id and q["quiz_date"] >= since]
+
+    async def answer_question(self, space_id, qid, idx, correct):
+        q = self.questions.get(qid)
+        if not q or q["space_id"] != space_id or q["answer_idx"] is not None:
+            return False
+        q.update(answer_idx=idx, correct=correct)
+        return True
+
+    async def verse_misses(self, space_id):
+        return {vid: m for (sid, vid), m in self.misses.items() if sid == space_id}
+
+    async def set_verse_miss(self, space_id, verse_id, misses):
+        self.misses[(space_id, verse_id)] = misses
