@@ -118,6 +118,8 @@ async def load_today(r, space: dict, today: dt.date, state=None) -> TodayView:
     state = state or await load_state(r, space["id"], today)
     view = build_today(*state, today)
     view.quiz = await load_quiz_status(r, space, today)
+    from .recite_handlers import load_recite_status
+    view.recite = await load_recite_status(r, space, today)
     return view
 
 

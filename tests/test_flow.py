@@ -42,6 +42,11 @@ class FakeBot:
         self.sent.append(m)
         return m
 
+    async def edit_message_text(self, chat_id, message_id, text, reply_markup=None, **kw):
+        m = next(m for m in self.sent if m.message_id == message_id)
+        m.text, m.reply_markup = text, reply_markup
+        return m
+
     @property
     def last(self):
         return self.sent[-1]

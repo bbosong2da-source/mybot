@@ -9,6 +9,7 @@ from telegram import ForceReply, Update
 
 from . import dates
 from .quiz_handlers import on_quiz_button
+from .recite_handlers import on_recite_button, on_rv_button
 from .common import load_today, repo, safe_edit, send_to_space, space_of_query
 from .views import (render_broadcast, render_routine_delete_confirm, render_routine_detail,
                     render_routines, render_today)
@@ -292,4 +293,6 @@ _HANDLERS = {
     "rm": _rm, "rd": _rd, "rn": _rn, "rx": _rx, "ry": _ry,
     "bc": _bc,
     "qz": on_quiz_button,
+    "rc": on_recite_button,
+    "rv": on_rv_button,
 }
