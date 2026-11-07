@@ -13,6 +13,7 @@ from .common import load_state, load_today, repo, send_to_space
 from .config import WEEKLY_FALLBACK_TIME
 from .logic import build_week
 from .quiz_handlers import issue_due_quizzes
+from .recite_handlers import issue_recite_slots
 from .views import render_today, render_week
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ async def morning_job(context):
 
 
 async def minute_job(context):
-    """매분 실행: 성구 퀴즈 정각 출제 + 공간별 밤 점검(토요일엔 주간 리포트도) 전송."""
+    """매분 실행: 성구 퀴즈 정각 출제 + 계시록 암송 카드 + 공간별 밤 점검(토요일엔 주간 리포트도) 전송."""
     r = repo(context)
     now = dates.now()
     hhmm = now.strftime("%H:%M")
@@ -51,6 +52,7 @@ async def minute_job(context):
 
     spaces = await r.all_spaces()
     await issue_due_quizzes(context, spaces, now, SEND_GAP)
+    await issue_recite_slots(context, spaces, now, SEND_GAP)
 
     for space in spaces:
         if space.get("disabled"):

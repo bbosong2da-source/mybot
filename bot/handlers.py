@@ -28,6 +28,7 @@ WELCOME = (
     "/w 주간 리포트 (일~토)\n"
     "/t 밤 점검 시각 — <code>/t 22:30</code>, 끄기 <code>/t off</code>\n"
     "/q 성구 퀴즈 시간 — <code>/q 9-18</code>, 끄기 <code>/q off</code>\n"
+    "/rv 계시록 암송 — 시작·진도판·설정\n"
     "/off · /on 이 방에서 봇 끄기·켜기\n\n"
     "💬 관리자에게 질문하려면 <code>질문: 내용</code>\n\n"
     "🌱 배움의 씨앗을 심고 촘촘하게 가꿔 보세요!"
@@ -42,6 +43,7 @@ CHEERS = [
 ]
 
 MARKER_RE = re.compile(r"#([TRS])(\d+)\b")
+TYPING_RE = re.compile(r"#V(\d{8})-(\d+)-(\d+)\b")
 CATEGORY_RE = re.compile(r"^\[\s*([^\]]{1,30}?)\s*\]\s*(.*)$")
 
 
@@ -149,6 +151,11 @@ async def handle_message(update: Update, context):
     # 1) 봇의 '이름 변경' 또는 '질문' 메시지에 단 답장
     reply = msg.reply_to_message
     if reply and reply.from_user and reply.from_user.id == context.bot.id and reply.text:
+        t = TYPING_RE.search(reply.text)
+        if t:   # 계시록 암송 타이핑 채점
+            from .recite_handlers import handle_typing
+            await handle_typing(update, context, space, t.group(1), int(t.group(2)), int(t.group(3)), text)
+            return
         m = MARKER_RE.search(reply.text)
         if m and await _handle_marker_reply(update, context, space, m.group(1), int(m.group(2)), text):
             return

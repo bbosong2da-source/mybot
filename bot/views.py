@@ -15,6 +15,7 @@ callback_data 규칙 (64바이트 제한, 항목은 인덱스가 아닌 DB id로
   rx:{id} / ry:{id}  루틴 삭제 확인 / 삭제 실행
   bc:{bid}:{idx}     공지 과제 토글
   qz:{qid}:{idx}     성구 퀴즈 답 선택 / qz:i 퀴즈 루틴 안내
+  rc:* / rv:*        계시록 암송 카드 / 진도판 (recite_handlers.py 맨 위 설명 참고)
 """
 from __future__ import annotations
 
@@ -61,23 +62,33 @@ def _quiz_label(q) -> str:
     return f"{icon} 📜 성구 퀴즈 {q.answered}/{q.target}{fire}"
 
 
+def _recite_label(s) -> str:
+    icon = "🍋" if s.is_done else "🥚"
+    fire = f" 🔥{s.streak}" if s.streak >= 2 else ""
+    return f"{icon} 📖 계시록 암송 {s.done}/{s.total}{fire}"
+
+
 def _routine_rows(view: TodayView, mode: str, pending_only: bool = False):
     items = [r for r in view.routines if not (pending_only and r.done_today)]
     show_quiz = view.quiz is not None and not (pending_only and view.quiz.done)
+    show_recite = view.recite is not None and not (pending_only and view.recite.is_done)
     rows = []
-    if items or show_quiz:
+    if items or show_quiz or show_recite:
         rows.append([Btn("🐦‍⬛ 남은 루틴" if pending_only else "🐦‍⬛ 오늘의 루틴", callback_data=NOOP)])
     rows += [[Btn(_routine_label(r), callback_data=f"r:{mode}:{r.routine['id']}")] for r in items]
     if show_quiz:
         rows.append([Btn(_quiz_label(view.quiz), callback_data="qz:i")])
+    if show_recite:
+        rows.append([Btn(_recite_label(view.recite), callback_data="rc:i")])
     return rows
 
 
 def _stats_line(view: TodayView) -> str:
     parts = []
-    total = len(view.routines) + (1 if view.quiz else 0)
+    total = len(view.routines) + (1 if view.quiz else 0) + (1 if view.recite else 0)
     if total:
-        done = sum(r.done_today for r in view.routines) + (1 if view.quiz and view.quiz.done else 0)
+        done = (sum(r.done_today for r in view.routines) + (1 if view.quiz and view.quiz.done else 0)
+                + (1 if view.recite and view.recite.is_done else 0))
         parts.append(f"🐦‍⬛ 루틴 {done}/{total}")
     items = view.task_items
     if items:

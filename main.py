@@ -9,7 +9,7 @@ from telegram.constants import ParseMode
 from telegram.ext import (ApplicationBuilder, CallbackQueryHandler, CommandHandler, Defaults,
                           MessageHandler, filters)
 
-from bot import admin, callbacks, handlers, jobs, quiz_handlers
+from bot import admin, callbacks, handlers, jobs, quiz_handlers, recite_handlers
 from bot.config import (ADMIN_ID, BOT_TOKEN, MORNING_HOUR, PORT, SUPABASE_KEY, SUPABASE_URL, TZ)
 from bot.storage import MemoryRepo, SupabaseRepo
 
@@ -23,6 +23,7 @@ USER_COMMANDS = [
     BotCommand("w", "주간 리포트"),
     BotCommand("t", "밤 점검 시각 (/t 22:00, /t off)"),
     BotCommand("q", "성구 퀴즈 시간 (/q 13-22, /q off)"),
+    BotCommand("rv", "계시록 암송 (시작·진도판)"),
     BotCommand("start", "사용 안내"),
     BotCommand("off", "이 방에서 봇 끄기"),
     BotCommand("on", "이 방에서 봇 켜기"),
@@ -34,6 +35,8 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("qa", "[관리자] 성구 등록"),
     BotCommand("qv", "[관리자] 성구 목록"),
     BotCommand("qd", "[관리자] 성구 삭제"),
+    BotCommand("rva", "[관리자] 암송 본문 등록"),
+    BotCommand("rvs", "[관리자] 암송 현황"),
 ]
 
 
@@ -95,6 +98,9 @@ def build_app():
     cmd(["qa"], quiz_handlers.cmd_quiz_add)
     cmd(["qv"], quiz_handlers.cmd_quiz_list)
     cmd(["qd"], quiz_handlers.cmd_quiz_delete)
+    cmd(["rv", "recite"], recite_handlers.cmd_recite)
+    cmd(["rva"], recite_handlers.cmd_recite_add)
+    cmd(["rvs"], recite_handlers.cmd_recite_status)
 
     app.add_handler(CallbackQueryHandler(callbacks.on_button))
     app.add_handler(MessageHandler(filters.StatusUpdate.FORUM_TOPIC_EDITED, handlers.handle_topic_edited))

@@ -12,7 +12,8 @@ import asyncio
 import datetime as dt
 import itertools
 
-DATE_FIELDS = ("due_date", "done_at", "created_on", "log_date", "quiz_date")
+DATE_FIELDS = ("due_date", "done_at", "created_on", "log_date", "quiz_date",
+               "learned_on", "started_on", "recite_date")
 
 
 def _to_py(row: dict) -> dict:
@@ -217,6 +218,46 @@ class SupabaseRepo:
             {"space_id": space_id, "verse_id": verse_id, "misses": misses},
             on_conflict="space_id,verse_id"))
 
+    # --- 계시록 암송 -------------------------------------------------------
+    async def recite_verses(self, course: str) -> list[dict]:
+        return await self._run(lambda: self._t("recite_verses").select("*")
+                               .eq("course", course).order("seq"))
+
+    async def upsert_recite_verses(self, rows: list[dict]) -> None:
+        for i in range(0, len(rows), 200):
+            part = rows[i:i + 200]
+            await self._run(lambda: self._t("recite_verses").upsert(part, on_conflict="course,ref"))
+
+    async def get_member(self, space_id: int) -> dict | None:
+        rows = await self._run(lambda: self._t("recite_members").select("*").eq("space_id", space_id))
+        return rows[0] if rows else None
+
+    async def save_member(self, row: dict) -> None:
+        await self._run(lambda: self._t("recite_members").upsert(_to_db(row), on_conflict="space_id"))
+
+    async def all_members(self) -> list[dict]:
+        return await self._run(lambda: self._t("recite_members").select("*").order("space_id"))
+
+    async def recite_cards(self, space_id: int) -> list[dict]:
+        return await self._run(lambda: self._t("recite_cards").select("*").eq("space_id", space_id))
+
+    async def save_card(self, row: dict) -> None:
+        await self._run(lambda: self._t("recite_cards").upsert(
+            _to_db(row), on_conflict="space_id,verse_id"))
+
+    async def get_recite_day(self, space_id: int, day: dt.date) -> dict | None:
+        rows = await self._run(lambda: self._t("recite_days").select("*")
+                               .eq("space_id", space_id).eq("recite_date", day.isoformat()))
+        return rows[0] if rows else None
+
+    async def save_recite_day(self, row: dict) -> None:
+        await self._run(lambda: self._t("recite_days").upsert(
+            _to_db(row), on_conflict="space_id,recite_date"))
+
+    async def recite_days_since(self, space_id: int, since: dt.date) -> list[dict]:
+        return await self._run(lambda: self._t("recite_days").select("recite_date,queue")
+                               .eq("space_id", space_id).gte("recite_date", since.isoformat()))
+
 
 class MemoryRepo:
     def __init__(self):
@@ -230,6 +271,10 @@ class MemoryRepo:
         self.verses: dict[int, dict] = {}
         self.questions: dict[int, dict] = {}
         self.misses: dict[tuple[int, int], int] = {}
+        self.rverses: dict[int, dict] = {}
+        self.members: dict[int, dict] = {}
+        self.cards: dict[tuple[int, int], dict] = {}
+        self.rdays: dict[tuple[int, dt.date], dict] = {}
         self._ids = itertools.count(1)
 
     def _new(self, row: dict, **defaults) -> dict:
@@ -402,3 +447,45 @@ class MemoryRepo:
 
     async def set_verse_miss(self, space_id, verse_id, misses):
         self.misses[(space_id, verse_id)] = misses
+
+    # --- 계시록 암송 -------------------------------------------------------
+    async def recite_verses(self, course):
+        return [dict(v) for v in sorted(self.rverses.values(), key=lambda v: v["seq"])
+                if v["course"] == course]
+
+    async def upsert_recite_verses(self, rows):
+        by_key = {(v["course"], v["ref"]): v for v in self.rverses.values()}
+        for row in rows:
+            key = (row["course"], row["ref"])
+            if key in by_key:
+                by_key[key].update(row)
+            else:
+                v = self._new(row)
+                self.rverses[v["id"]] = v
+
+    async def get_member(self, space_id):
+        m = self.members.get(space_id)
+        return dict(m) if m else None
+
+    async def save_member(self, row):
+        self.members.setdefault(row["space_id"], {}).update(row)
+
+    async def all_members(self):
+        return [dict(m) for _, m in sorted(self.members.items())]
+
+    async def recite_cards(self, space_id):
+        return [dict(c) for (sid, _), c in self.cards.items() if sid == space_id]
+
+    async def save_card(self, row):
+        self.cards.setdefault((row["space_id"], row["verse_id"]), {}).update(row)
+
+    async def get_recite_day(self, space_id, day):
+        d = self.rdays.get((space_id, day))
+        return {**d, "queue": [dict(q) for q in d["queue"]]} if d else None
+
+    async def save_recite_day(self, row):
+        self.rdays[(row["space_id"], row["recite_date"])] = {
+            **row, "queue": [dict(q) for q in row["queue"]]}
+
+    async def recite_days_since(self, space_id, since):
+        return [dict(d) for (sid, day), d in self.rdays.items() if sid == space_id and day >= since]

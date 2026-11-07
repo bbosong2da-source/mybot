@@ -131,6 +131,10 @@ async def on_document(update: Update, context):
         return
     file = await doc.get_file()
     data = bytes(await file.download_as_bytearray())
+    if "암송" in (getattr(update.effective_message, "caption", None) or ""):
+        from .recite_handlers import import_course
+        await import_course(update, context, decode_upload(data))
+        return
     await _import_verses(update, context, decode_upload(data))
 
 

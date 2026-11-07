@@ -71,6 +71,7 @@ class TodayView:
     categories: list[tuple[str, list[TaskItem]]] = field(default_factory=list)
     upcoming: list[dict] = field(default_factory=list)
     quiz: object | None = None   # quiz.QuizStatus — 오늘의 루틴처럼 보여 주는 성구 퀴즈
+    recite: object | None = None  # recite.ReciteStatus — 오늘의 루틴처럼 보여 주는 계시록 암송
 
     @property
     def task_items(self) -> list[TaskItem]:
@@ -82,7 +83,7 @@ class TodayView:
 
     @property
     def has_today(self) -> bool:
-        return bool(self.routines or self.categories or self.quiz)
+        return bool(self.routines or self.categories or self.quiz or self.recite)
 
     @property
     def is_empty(self) -> bool:
@@ -91,7 +92,8 @@ class TodayView:
     @property
     def all_clear(self) -> bool:
         return (self.has_today and all(r.done_today for r in self.routines)
-                and not self.open_tasks and (self.quiz is None or self.quiz.done))
+                and not self.open_tasks and (self.quiz is None or self.quiz.done)
+                and (self.recite is None or self.recite.is_done))
 
 
 def category_sort_key(name: str):
