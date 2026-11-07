@@ -37,8 +37,9 @@ async def on_button(update: Update, context):
     await handler(update, context, space, args)
 
 
-async def _rerender_today(query, context, space, mode: str, intro: str | None = None):
-    view = await load_today(repo(context), space, dates.today())
+async def _rerender_today(query, context, space, mode: str, intro: str | None = None,
+                          day: dt.date | None = None):
+    view = await load_today(repo(context), space, day or dates.today())
     text, markup = render_today(view, mode, intro=intro)
     await safe_edit(query, text, markup)
 
@@ -47,40 +48,78 @@ def _push_one_day(task: dict, today: dt.date) -> dt.date:
     return max(task["due_date"], today) + dt.timedelta(days=1)
 
 
+def _action_day(query, mode: str) -> dt.date | None:
+    """버튼이 기록할 날짜.
+    목록·편집 화면: 누른 날(오늘).
+    밤 점검 화면: 그 밤 점검이 가리키는 날. 자정을 넘겨 눌러도 다음 날 새벽 4시 전까지는
+    그날로 기록하고, 그 뒤에는 None(지난 점검)."""
+    if mode != "n":
+        return dates.today()
+    sent = getattr(query.message, "date", None) or dates.now()
+    day = dates.night_day_of(sent)
+    return day if dates.within_grace(day, dates.now()) else None
+
+
+async def _expired_night(query):
+    await query.answer("⏰ 지난 밤 점검이에요. /l 에서 오늘 목록을 확인해 주세요.", show_alert=True)
+    msg = query.message
+    try:
+        text = getattr(msg, "text_html", None) or getattr(msg, "text", None)
+    except Exception:   # 아주 오래된 메시지는 내용을 읽을 수 없음
+        text = None
+    if text:
+        await safe_edit(query, text + "\n\n⏰ <i>지난 밤 점검이에요. /l 에서 오늘 목록을 확인해 주세요.</i>", None)
+
+
 # --- 오늘 목록 / 밤 점검 ----------------------------------------------------
 async def _list(update, context, space, args):
-    await update.callback_query.answer()
-    await _rerender_today(update.callback_query, context, space, "n" if args == ["n"] else "l")
+    query = update.callback_query
+    mode = "n" if args == ["n"] else "l"
+    day = _action_day(query, mode)
+    if day is None:
+        await _expired_night(query)
+        return
+    await query.answer()
+    await _rerender_today(query, context, space, mode, day=day)
 
 
 async def _toggle_task(update, context, space, args):
     query = update.callback_query
     mode, task_id = args[0], int(args[1])
+    day = _action_day(query, mode)
+    if day is None:
+        await _expired_night(query)
+        return
     r = repo(context)
     task = await r.get_task(space["id"], task_id)
     if not task:
         await query.answer("이미 삭제된 할 일이에요.")
+    elif mode == "n" and task["done_at"] is not None:
+        await query.answer("이미 완료한 할 일이에요.")   # 밤 점검의 ✅는 '완료'만
     else:
         done = task["done_at"] is None
-        await r.update_task(space["id"], task_id, {"done_at": dates.today() if done else None})
+        await r.update_task(space["id"], task_id, {"done_at": day if done else None})
         await query.answer(random.choice(POP_CHEERS) if done and random.random() < 0.15 else None)
-    await _rerender_today(query, context, space, mode)
+    await _rerender_today(query, context, space, mode, day=day)
 
 
 async def _toggle_routine(update, context, space, args):
     query = update.callback_query
     mode, routine_id = args[0], int(args[1])
+    day = _action_day(query, mode)
+    if day is None:
+        await _expired_night(query)
+        return
     r = repo(context)
     routine = await r.get_routine(space["id"], routine_id)
     if not routine:
         await query.answer("이미 삭제된 루틴이에요.")
     else:
-        today = dates.today()
         logs = await r.routine_logs([routine_id])
-        done = today not in logs.get(routine_id, set())
-        await r.set_routine_log(routine_id, today, done)
+        done = day not in logs.get(routine_id, set())
+        await r.set_routine_log(routine_id, day, done)
         await query.answer(random.choice(POP_CHEERS) if done and random.random() < 0.15 else None)
-    await _rerender_today(query, context, space, mode)
+    await _rerender_today(query, context, space, mode, day=day)
 
 
 async def _night_action(update, context, space, args):
@@ -102,13 +141,17 @@ async def _edit(update, context, space, args):
 async def _task_action(update, context, space, args, mode: str):
     """args: ['t', id] 내일로 / ['x', id] 삭제"""
     query = update.callback_query
+    day = _action_day(query, mode)
+    if day is None:
+        await _expired_night(query)
+        return
     action, task_id = args[0], int(args[1])
     r = repo(context)
     task = await r.get_task(space["id"], task_id)
     if not task:
         await query.answer("이미 삭제된 할 일이에요.")
     elif action == "t":
-        new_due = _push_one_day(task, dates.today())
+        new_due = _push_one_day(task, day)   # 밤 점검이면 '그 밤의 다음 날'
         await r.update_task(space["id"], task_id, {"due_date": new_due})
         await query.answer(f"➡️ {dates.fmt_short(new_due)}로 미뤘어요")
     elif action == "x":
@@ -116,7 +159,7 @@ async def _task_action(update, context, space, args, mode: str):
         await query.answer("🗑 삭제했어요")
     else:
         await query.answer()
-    await _rerender_today(query, context, space, mode)
+    await _rerender_today(query, context, space, mode, day=day)
 
 
 async def _undo_date(update, context, space, args):

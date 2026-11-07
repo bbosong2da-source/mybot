@@ -21,6 +21,26 @@ def now() -> dt.datetime:
     return dt.datetime.now(TZ)
 
 
+# 밤 점검·성구 퀴즈는 다음 날 새벽 4시 전까지 '그날' 기록으로 인정한다
+GRACE_HOUR = 4
+
+
+def _aware(t: dt.datetime) -> dt.datetime:
+    return TZ.localize(t) if t.tzinfo is None else t.astimezone(TZ)
+
+
+def within_grace(day: dt.date, at: dt.datetime) -> bool:
+    """at 시각이 day 날짜 기록으로 인정되는 시간(다음 날 04시 전)인가."""
+    deadline = TZ.localize(dt.datetime.combine(day + dt.timedelta(days=1), dt.time(GRACE_HOUR)))
+    return _aware(at) < deadline
+
+
+def night_day_of(at: dt.datetime) -> dt.date:
+    """밤 점검이 가리키는 날짜. 새벽 4시 전이면 전날."""
+    local = _aware(at)
+    return local.date() - dt.timedelta(days=1) if local.hour < GRACE_HOUR else local.date()
+
+
 def sun_index(d: dt.date) -> int:
     """일요일=0 ... 토요일=6."""
     return (d.weekday() + 1) % 7

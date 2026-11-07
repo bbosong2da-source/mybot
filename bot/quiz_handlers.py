@@ -176,7 +176,6 @@ async def on_quiz_button(update: Update, context, space: dict, args: list[str]):
     if not q or not 0 <= idx < len(q["options"]):
         await query.answer("문제를 찾을 수 없어요.")
         return
-    today = dates.today()
     verse = next((v for v in await r.list_verses() if v["id"] == q.get("verse_id")), None)
 
     if q["answer_idx"] is not None:
@@ -185,7 +184,8 @@ async def on_quiz_button(update: Update, context, space: dict, args: list[str]):
         await safe_edit(query, text, markup)
         return
 
-    if q["quiz_date"] != today:
+    # 그날 문제는 다음 날 새벽 4시 전까지 풀 수 있다 (밤 점검과 같은 기준)
+    if not dates.within_grace(q["quiz_date"], dates.now()):
         await query.answer("⏰ 지난 문제예요. 다음 문제를 기다려 주세요!")
         text, _ = render_quiz(q)
         text += (f"\n\n⏰ 지난 문제라 기록되지 않아요. 정답: <b>{escape(q['options'][q['correct_idx']])}</b>")
@@ -208,7 +208,7 @@ async def on_quiz_button(update: Update, context, space: dict, args: list[str]):
             log.warning("틀린 기록 저장 실패: %s", e)
 
     await query.answer("⭕ 정답!" if correct else "❌ 아쉬워요!")
-    status = await load_quiz_status(r, space, today)
+    status = await load_quiz_status(r, space, q["quiz_date"])
     progress = None
     if status:
         progress = f"📜 오늘 퀴즈 {status.answered}/{status.target}"
