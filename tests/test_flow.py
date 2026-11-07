@@ -22,6 +22,7 @@ class FakeMessage:
         self.from_user, self.reply_to_message = user, reply_to
         self.reply_markup = markup
         self.message_id = next(self._ids)
+        self.date = dates.now()   # 텔레그램 메시지 발송 시각
 
     async def reply_text(self, text, reply_markup=None, **kw):
         return await self.bot.send_message(self.chat.id, text, message_thread_id=self.message_thread_id,
@@ -143,6 +144,7 @@ async def test_toggle_and_stale_button(h):
 async def test_overdue_and_night_actions(h, monkeypatch):
     await h.say("보고서\n청소\n독서")
     monkeypatch.setattr(dates, "today", lambda: TODAY + dt.timedelta(days=1))  # 다음 날
+    monkeypatch.setattr(dates, "now", lambda: dt.datetime(2026, 11, 6, 22, 0))
     space = (await h.repo.all_spaces())[0]
     night = await h.bot.send_message(1, "x")
     await h.click(night, "l:n")

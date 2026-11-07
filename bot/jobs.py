@@ -41,11 +41,12 @@ async def minute_job(context):
     r = repo(context)
     now = dates.now()
     hhmm = now.strftime("%H:%M")
-    today = now.date()
-    is_saturday = dates.sun_index(today) == 6
+    # 밤 점검이 가리키는 날: 새벽 4시 전이면 전날 (예: /t 00:30 -> 전날 밤 점검)
+    night_day = dates.night_day_of(now)
+    is_saturday = dates.sun_index(night_day) == 6
 
     sent: set = context.bot_data.setdefault("sent_marks", set())
-    for mark in [m for m in sent if m[1] != today]:
+    for mark in [m for m in sent if m[1] != night_day]:
         sent.discard(mark)
 
     spaces = await r.all_spaces()
@@ -59,21 +60,21 @@ async def minute_job(context):
         weekly = is_saturday and (night or (notify is None and hhmm == WEEKLY_FALLBACK_TIME))
         if not (night or weekly):
             continue
-        mark = (space["id"], today)
+        mark = (space["id"], night_day)
         if mark in sent:
             continue
         sent.add(mark)
         try:
-            state = await load_state(r, space["id"], today)
+            state = await load_state(r, space["id"], night_day)
             if night:
-                view = await load_today(r, space, today, state)
+                view = await load_today(r, space, night_day, state)
                 if not view.is_empty:
                     text, markup = render_today(view, "n")
                     await send_to_space(context.bot, space, text, markup)
             if weekly:
                 tasks, routines, _ = state
                 if tasks or routines:
-                    text, markup = render_week(build_week(*state, today))
+                    text, markup = render_week(build_week(*state, night_day))
                     await send_to_space(context.bot, space, text, markup)
         except Exception:
             log.exception("밤 점검 실패 space=%s", space.get("id"))
