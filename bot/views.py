@@ -16,6 +16,7 @@ callback_data 규칙 (64바이트 제한, 항목은 인덱스가 아닌 DB id로
   bc:{bid}:{idx}     공지 과제 토글
   qz:{qid}:{idx}     성구 퀴즈 답 선택 / qz:i 퀴즈 루틴 안내
   rc:* / rv:*        계시록 암송 카드 / 진도판 (recite_handlers.py 맨 위 설명 참고)
+  cx:{id}            다 끝내서 접힌 섹션 펼치기 (그 섹션의 할 일 id로 섹션을 찾음)
 """
 from __future__ import annotations
 
@@ -109,8 +110,10 @@ def _upcoming_text(view: TodayView) -> str:
     return "\n".join(lines)
 
 
-def render_today(view: TodayView, mode: str = "l", intro: str | None = None):
-    """mode: l=오늘 목록, n=밤 점검, e=편집"""
+def render_today(view: TodayView, mode: str = "l", intro: str | None = None,
+                 expanded: str | None = None):
+    """mode: l=오늘 목록, n=밤 점검, e=편집
+    expanded: 목록에서 펼쳐 볼 '다 끝낸 섹션' 이름 (그 밖의 다 끝낸 섹션은 한 줄로 접힘)"""
     if mode == "n":
         return _render_night(view, intro)
     if mode == "e":
@@ -130,16 +133,23 @@ def render_today(view: TodayView, mode: str = "l", intro: str | None = None):
     text = "\n".join(lines) + _upcoming_text(view)
 
     rows = _routine_rows(view, "l")
-    shown = 0
+    shown = hidden = 0
     for cat, items in view.categories:
-        rows.append([Btn(f"☁️ {_cut(cat, 40)}", callback_data=NOOP)])
+        if all(i.done for i in items) and cat != expanded:
+            # 섹션을 다 끝내면 한 줄로 접는다. 누르면 펼쳐서 실수로 누른 항목을 되돌릴 수 있다.
+            rows.append([Btn(f"🌾 {_cut(cat, 30)} 완료 ({len(items)}) ▸",
+                             callback_data=f"cx:{items[0].task['id']}")])
+            continue
+        title = f"🔽 {_cut(cat, 30)} 접기" if cat == expanded else f"☁️ {_cut(cat, 40)}"
+        rows.append([Btn(title, callback_data="l" if cat == expanded else NOOP)])
         for item in items:
             if shown >= MAX_LIST_TASKS:
-                break
+                hidden += 1
+                continue
             rows.append([Btn(_task_label(item), callback_data=f"t:l:{item.task['id']}")])
             shown += 1
-    if len(view.task_items) > shown:
-        rows.append([Btn(f"… 외 {len(view.task_items) - shown}개 (편집 화면에서 정리)", callback_data=NOOP)])
+    if hidden:
+        rows.append([Btn(f"… 외 {hidden}개 (편집 화면에서 정리)", callback_data=NOOP)])
     if view.task_items or view.upcoming:
         rows.append([Btn("✏️ 편집", callback_data="e"), Btn("🔄 새로고침", callback_data="l")])
     return text, _markup(rows)
