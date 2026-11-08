@@ -308,3 +308,39 @@ async def test_topic_spaces_are_separate(monkeypatch):
     spaces = await h1.repo.all_spaces()
     assert [(s["chat_id"], s["thread_id"]) for s in spaces] == [(-100, 11), (-100, 12)]
     assert h1.bot.sent[-1].message_thread_id == 12
+
+
+async def test_finished_section_folds_and_can_expand(h):
+    msg = await h.say("[논문]\n자료 조사\n초안 작성\n[운동]\n스쿼트")
+    await h.say("/r 영단어", handler=handlers.cmd_routine)
+    msg = await h.say("/l", handler=handlers.cmd_list)
+    ids = {t["title"]: t["id"] for t in h.repo.tasks.values()}
+
+    await h.click(msg, f"t:l:{ids['자료 조사']}")
+    labels = [t for t, _ in h.buttons(msg)]
+    assert "☁️ 논문" in labels and "🎓 자료 조사" in labels          # 다 끝나기 전엔 🎓로 남음
+
+    await h.click(msg, f"t:l:{ids['초안 작성']}")                     # 마지막 항목 -> 즉시 접힘
+    labels = [t for t, _ in h.buttons(msg)]
+    assert "🌾 논문 완료 (2) ▸" in labels
+    assert not any("자료 조사" in t or "초안 작성" in t for t in labels)
+    assert "☁️ 운동" in labels and "🥚 스쿼트" in labels
+    assert "할 일 2/3" in msg.text                                    # 통계에는 그대로 포함
+
+    await h.click(msg, h.button(msg, "논문 완료"))                    # 펼치기
+    labels = [t for t, _ in h.buttons(msg)]
+    assert "🔽 논문 접기" in labels and "🎓 초안 작성" in labels
+    await h.click(msg, f"t:l:{ids['초안 작성']}")                     # 실수 되돌리기
+    labels = [t for t, _ in h.buttons(msg)]
+    assert "☁️ 논문" in labels and "🥚 초안 작성" in labels
+
+    # 루틴은 다 끝내도 접지 않음
+    await h.click(msg, h.button(msg, "영단어"))
+    assert any("🍋 영단어" in t for t, _ in h.buttons(msg))
+
+    # 모두 끝내면 섹션 둘 다 접히고 ALL CLEAR
+    await h.click(msg, f"t:l:{ids['초안 작성']}")
+    await h.click(msg, f"t:l:{ids['스쿼트']}")
+    labels = [t for t, _ in h.buttons(msg)]
+    assert "🌾 논문 완료 (2) ▸" in labels and "🌾 운동 완료 (1) ▸" in labels
+    assert "ALL CLEAR" in msg.text

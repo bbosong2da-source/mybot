@@ -72,6 +72,16 @@ async def _expired_night(query):
         await safe_edit(query, text + "\n\n⏰ <i>지난 밤 점검이에요. /l 에서 오늘 목록을 확인해 주세요.</i>", None)
 
 
+async def _expand_section(update, context, space, args):
+    """접힌 '다 끝낸 섹션'을 펼친다. 섹션 이름은 64바이트 제한 때문에 할 일 id로 찾는다."""
+    query = update.callback_query
+    task = await repo(context).get_task(space["id"], int(args[0]))
+    await query.answer()
+    view = await load_today(repo(context), space, dates.today())
+    text, markup = render_today(view, "l", expanded=task["category"] if task else None)
+    await safe_edit(query, text, markup)
+
+
 # --- 오늘 목록 / 밤 점검 ----------------------------------------------------
 async def _list(update, context, space, args):
     query = update.callback_query
@@ -294,5 +304,6 @@ _HANDLERS = {
     "bc": _bc,
     "qz": on_quiz_button,
     "rc": on_recite_button,
+    "cx": _expand_section,
     "rv": on_rv_button,
 }
