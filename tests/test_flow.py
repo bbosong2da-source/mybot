@@ -42,6 +42,10 @@ class FakeBot:
         self.sent.append(m)
         return m
 
+    async def delete_message(self, chat_id, message_id, **kw):
+        self.deleted = getattr(self, "deleted", []) + [message_id]
+        return True
+
     async def edit_message_text(self, chat_id, message_id, text, reply_markup=None, **kw):
         m = next(m for m in self.sent if m.message_id == message_id)
         m.text, m.reply_markup = text, reply_markup

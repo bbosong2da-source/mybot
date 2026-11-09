@@ -24,6 +24,11 @@ INTERVALS = (1, 3, 7, 15, 30, 60)   # 상자(box) 단계별 다음 복습까지 
 MAX_REVIEWS = 15                    # 하루 복습 최대 개수 (밀린 복습 폭탄 방지)
 CHAIN_RATE = 0.4                    # 복습 중 '이어 말하기' 비율
 MASTER_BOX = 3                      # 이 단계(15일 간격) 이상이면 '단단히 외움'
+KNOWN_BOX = 2                       # 바로 시험·장별 시험에서 처음부터 완벽 → '이미 아는 구절'(7일 뒤 복습)
+BOOKMARK_MAX_DAYS = 3               # 북마크한 구절은 복습 간격을 최대 3일로
+AUTO_BOOKMARK_FAILS = 2             # '못 외움'이 이만큼 쌓이면 자동 북마크
+AUTO_UNBOOKMARK_STREAK = 3          # 북마크한 구절을 연속 이만큼 '완벽'이면 자동 해제
+PASS_RATE = 0.9                     # 장별 시험 통과 기준 (완벽 비율)
 GRADE_LABELS = {2: "완벽", 1: "조금 틀림", 0: "못 외움"}
 
 
@@ -86,18 +91,17 @@ def blanks(text: str, seed: int, every: int = 3) -> str:
 # ---------------------------------------------------------------------------
 # 하루 카드 목록과 간격 복습
 # ---------------------------------------------------------------------------
-def build_queue(day: dt.date, next_seq: int, daily_new: int, verses: list[dict],
-                cards: list[dict], rng: random.Random) -> list[dict]:
-    by_seq = {v["seq"]: v for v in verses}
-    queue = []
-    for seq in range(next_seq, next_seq + daily_new):
-        if seq in by_seq:
-            queue.append({"v": by_seq[seq]["id"], "seq": seq, "k": "new", "g": None, "s": None})
-    new_ids = {q["v"] for q in queue}
+def build_queue(day: dt.date, daily_new: int, verses: list[dict], cards: list[dict],
+                rng: random.Random, bookmarked: set[int] | frozenset = frozenset()) -> list[dict]:
+    """새 구절: 아직 안 외운 절 중 가장 앞 절부터 (장별 시험으로 외운 절은 건너뜀).
+    복습: 복습일이 된 절, 북마크한 절을 먼저 (하루 최대 MAX_REVIEWS개)."""
+    learned = {c["verse_id"] for c in cards}
+    queue = [{"v": v["id"], "seq": v["seq"], "k": "new", "g": None, "s": None}
+             for v in sorted(verses, key=lambda v: v["seq"]) if v["id"] not in learned][:daily_new]
     seq_of = {v["id"]: v["seq"] for v in verses}
-    due = [c for c in cards if c["due_date"] <= day and c["verse_id"] not in new_ids
-           and c["verse_id"] in seq_of]
-    due.sort(key=lambda c: (c["due_date"], c["box"], seq_of[c["verse_id"]]))
+    due = [c for c in cards if c["due_date"] <= day and c["verse_id"] in seq_of]
+    due.sort(key=lambda c: (c["verse_id"] not in bookmarked, c["due_date"], c["box"],
+                            seq_of[c["verse_id"]]))
     for c in due[:MAX_REVIEWS]:
         seq = seq_of[c["verse_id"]]
         kind = "chain" if seq > 1 and rng.random() < CHAIN_RATE else "recall"
@@ -105,16 +109,87 @@ def build_queue(day: dt.date, next_seq: int, daily_new: int, verses: list[dict],
     return queue
 
 
-def apply_grade(card: dict | None, grade: int, day: dt.date) -> dict:
-    """채점 결과로 새 상자 단계와 다음 복습일."""
+def apply_grade(card: dict | None, grade: int, day: dt.date, known: bool = False,
+                bookmarked: bool = False) -> dict:
+    """채점 결과로 새 상자 단계와 다음 복습일.
+    known: 처음 보는 구절을 4단계 없이 바로 시험 봐서 완벽 → 이미 아는 구절로 보고 7일 뒤 복습.
+    bookmarked: 북마크한 구절은 복습 간격을 최대 3일로."""
     box = -1 if card is None else card["box"]
-    if grade == 2:
+    if card is None and known and grade == 2:
+        box = KNOWN_BOX
+    elif grade == 2:
         box = min(box + 1, len(INTERVALS) - 1)
     elif grade == 1:
         box = max(box, 0)
     else:
         box = 0
-    return {"box": box, "due_date": day + dt.timedelta(days=INTERVALS[box]), "last_grade": grade}
+    days = min(INTERVALS[box], BOOKMARK_MAX_DAYS) if bookmarked else INTERVALS[box]
+    return {"box": box, "due_date": day + dt.timedelta(days=days), "last_grade": grade}
+
+
+def exam_card_update(card: dict | None, grade: int, day: dt.date, bookmarked: bool = False) -> dict | None:
+    """장별 시험 결과를 진도에 반영. None이면 카드를 만들지 않음
+    (아직 안 외운 절을 '못 외움' → 나중에 새 구절 4단계로 차근차근 배우도록)."""
+    if card is None:
+        if grade == 0:
+            return None
+        return apply_grade(None, grade, day, known=True, bookmarked=bookmarked)
+    return apply_grade(card, grade, day, bookmarked=bookmarked)
+
+
+# ---------------------------------------------------------------------------
+# 북마크: 직접 ⭐ + '못 외움' 2번이면 자동 ⭐, 북마크 중 연속 3번 '완벽'이면 자동 해제
+# ---------------------------------------------------------------------------
+def update_mark(mark: dict | None, grade: int) -> tuple[dict, str | None]:
+    m = {"bookmarked": False, "auto": False, "fails": 0, "streak": 0, **(mark or {})}
+    event = None
+    if grade == 0:
+        m["fails"] += 1
+        m["streak"] = 0
+        if not m["bookmarked"] and m["fails"] >= AUTO_BOOKMARK_FAILS:
+            m.update(bookmarked=True, auto=True)
+            event = "on"
+    elif grade == 2:
+        m["streak"] += 1
+        if m["bookmarked"] and m["streak"] >= AUTO_UNBOOKMARK_STREAK:
+            m.update(bookmarked=False, auto=False, fails=0, streak=0)
+            event = "off"
+    else:
+        m["streak"] = 0
+    return m, event
+
+
+def toggle_mark(mark: dict | None) -> dict:
+    m = {"bookmarked": False, "auto": False, "fails": 0, "streak": 0, **(mark or {})}
+    if m["bookmarked"]:
+        m.update(bookmarked=False, auto=False, fails=0, streak=0)
+    else:
+        m.update(bookmarked=True, auto=False, streak=0)
+    return m
+
+
+# ---------------------------------------------------------------------------
+# 장별 시험 결과
+# ---------------------------------------------------------------------------
+@dataclass
+class ExamSummary:
+    total: int
+    perfect: int
+    partial: int
+    fail: int
+
+    @property
+    def finished(self) -> bool:
+        return self.perfect + self.partial + self.fail == self.total
+
+    @property
+    def passed(self) -> bool:
+        return self.finished and self.total > 0 and self.perfect / self.total >= PASS_RATE
+
+
+def exam_summary(items: list[dict]) -> ExamSummary:
+    grades = [i["g"] for i in items]
+    return ExamSummary(len(items), grades.count(2), grades.count(1), grades.count(0))
 
 
 def pending(queue: list[dict]) -> list[int]:
@@ -145,8 +220,8 @@ def queue_counts(queue: list[dict]) -> tuple[int, int]:
     return len(queue), sum(q["g"] is not None for q in queue)
 
 
-def expected_finish(next_seq: int, total: int, daily_new: int, today: dt.date) -> dt.date | None:
-    remaining = total - (next_seq - 1)
+def expected_finish(learned: int, total: int, daily_new: int, today: dt.date) -> dt.date | None:
+    remaining = total - learned
     if remaining <= 0:
         return None
     return today + dt.timedelta(days=math.ceil(remaining / daily_new) - 1)
@@ -211,8 +286,8 @@ def chapter_board(verses: list[dict], cards: list[dict]) -> list[tuple[int, int,
     return [(ch, *stats[ch]) for ch in sorted(stats)]
 
 
-def chapter_icon(total: int, learned: int, mastered: int) -> str:
-    if total and mastered == total:
+def chapter_icon(total: int, learned: int, mastered: int, passed: bool = False) -> str:
+    if passed or (total and mastered == total):
         return "🏅"
     if total and learned == total:
         return "✅"

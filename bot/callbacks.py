@@ -9,6 +9,7 @@ from telegram import ForceReply, Update
 
 from . import dates
 from .quiz_handlers import on_quiz_button
+from .recite_exam import on_ex, on_rb, on_rk, on_rs
 from .recite_handlers import on_recite_button, on_rv_button
 from .common import load_today, repo, safe_edit, send_to_space, space_of_query
 from .views import (render_broadcast, render_routine_delete_confirm, render_routine_detail,
@@ -297,13 +298,28 @@ async def _bc(update, context, space, args):
     await safe_edit(query, text, markup)
 
 
-_HANDLERS = {
-    "l": _list, "t": _toggle_task, "r": _toggle_routine, "n": _night_action,
-    "e": _edit, "u": _undo_date,
-    "rm": _rm, "rd": _rd, "rn": _rn, "rx": _rx, "ry": _ry,
-    "bc": _bc,
-    "qz": on_quiz_button,
-    "rc": on_recite_button,
-    "cx": _expand_section,
-    "rv": on_rv_button,
-}
+_HANDLER_LIST = [
+    ("l", _list),
+    ("t", _toggle_task),
+    ("r", _toggle_routine),
+    ("n", _night_action),
+    ("e", _edit),
+    ("u", _undo_date),
+    ("rm", _rm),
+    ("rd", _rd),
+    ("rn", _rn),
+    ("rx", _rx),
+    ("ry", _ry),
+    ("bc", _bc),
+    ("qz", on_quiz_button),
+    ("rc", on_recite_button),
+    ("cx", _expand_section),
+    ("rv", on_rv_button),
+    ("rs", on_rs),
+    ("ex", on_ex),
+    ("rk", on_rk),
+    ("rb", on_rb),
+]
+_HANDLERS = dict(_HANDLER_LIST)
+# 같은 접두어를 두 기능이 쓰면 한쪽 버튼이 조용히 다른 기능으로 연결되므로, 시작할 때 막는다
+assert len(_HANDLERS) == len(_HANDLER_LIST), "callback_data 접두어가 겹칩니다"
