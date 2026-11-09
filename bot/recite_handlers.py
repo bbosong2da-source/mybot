@@ -25,7 +25,7 @@ from .config import ADMIN_ID
 from .quiz import parse_hours, quiz_streak
 from .recite import (COURSE, DAILY_CHOICES, DEFAULT_HOURS, GRADE_LABELS, ReciteStatus,
                      apply_grade, assign_slot, blanks, build_queue, chapter_board,
-                     chapter_icon, choseong, expected_finish, grade_typing, parse_recite_text,
+                     chapter_icon, expected_finish, grade_typing, parse_recite_text,
                      pending, queue_counts, toggle_mark, update_mark)
 
 log = logging.getLogger(__name__)
@@ -166,8 +166,8 @@ def render_card(day: dt.date, queue: list[dict], idx: int, stage: str,
                 f"\n\n<i>2/4 · 빈칸을 채우며 읽어 보세요.</i>")
         rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "3"))]]
     elif stage == "3":
-        text = (f"{head}\n\n<b>{ref}</b>\n{escape(choseong(verse['body']))}"
-                f"\n\n<i>3/4 · 첫 글자만 보고 읽어 보세요.</i>")
+        text = (f"{head}\n\n<b>{ref}</b>\n{escape(blanks(verse['body'], verse['id'], hide=2))}"
+                f"\n\n<i>3/4 · 더 넓어진 빈칸을 채우며 읽어 보세요.</i>")
         rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "4"))]]
     elif stage in ("4", "c"):
         if stage == "c" and prev:
@@ -468,7 +468,7 @@ async def render_board(r, space: dict, member: dict, intro: str | None = None):
 INTRO = (
     "📖 <b>계시록 전문 암송</b>\n\n"
     "매일 저녁 시간대에 나눠서 <b>새 구절</b>과 <b>복습 카드</b>를 보내 드려요.\n"
-    "• 새 구절: 전문 → 빈칸 → 초성 → 주소만 보고 떠올리기\n"
+    "• 새 구절: 전문 → 빈칸 → 더 넓은 빈칸 → 주소만 보고 떠올리기\n"
     "• 복습: 잊을 때쯤 다시 (1·3·7·15·30·60일 간격)\n"
     "• 채점: 정답 보고 스스로, 또는 ⌨️ 타이핑으로\n"
     "• 이미 외운 장은 <code>/rv 시험</code>으로 시험 보고 통과하면 건너뛰어요\n\n"

@@ -80,11 +80,14 @@ def choseong(text: str) -> str:
     return "".join(out)
 
 
-def blanks(text: str, seed: int, every: int = 3) -> str:
-    """단어 세 개 중 하나를 ___ 로 가린다 (구절마다 늘 같은 자리)."""
+def blanks(text: str, seed: int, every: int = 3, hide: int = 1) -> str:
+    """단어 every개마다 hide개를 ___ 로 가린다 (구절마다 늘 같은 자리).
+    2단계는 hide=1(세 개 중 하나), 3단계는 hide=2(세 개 중 둘). 3단계는 2단계에서 가린 자리를
+    그대로 가리고 하나를 더 가리므로 단계가 자연스럽게 어려워진다.
+    빈칸 길이는 단어 길이를 따라가서(2~4칸) 글자 수 힌트가 된다."""
     words = text.split()
     offset = random.Random(seed).randrange(every)
-    return " ".join("＿" * max(2, min(len(w), 4)) if i % every == offset else w
+    return " ".join("＿" * max(2, min(len(w), 4)) if (i - offset) % every < hide else w
                     for i, w in enumerate(words))
 
 

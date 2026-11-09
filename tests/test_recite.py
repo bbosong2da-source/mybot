@@ -38,6 +38,12 @@ def test_choseong_and_blanks():
     assert b == blanks(text, seed=1)                  # 같은 구절은 늘 같은 자리
     assert b.count("＿") > 0 and len(b.split()) == len(text.split())
     assert sum("＿" in w for w in b.split()) == 3     # 7단어 중 세 개 중 하나꼴
+    wide = blanks(text, seed=1, hide=2)
+    hidden1 = {i for i, w in enumerate(b.split()) if "＿" in w}
+    hidden2 = {i for i, w in enumerate(wide.split()) if "＿" in w}
+    assert hidden1 < hidden2 and len(hidden2) == 5                # 2단계 빈칸 + 더 가림 (7단어 중 5개)
+    assert wide.split()[1] == "＿＿＿＿"                          # 빈칸 길이 = 글자 수 힌트 (그리스도의 → 4칸)
+    assert wide.split()[0] in ("예수", "＿＿")
 
 
 def _verses(n=30):
@@ -229,8 +235,10 @@ async def test_start_and_full_evening(h, monkeypatch):
     b = buttons(h, card)
     await h.click(card, b["다음 단계 ▶"])
     assert "2/4" in card.text and "＿" in card.text
+    stage2_blanks = card.text.count("＿")
     await h.click(card, buttons(h, card)["다음 단계 ▶"])
-    assert "3/4" in card.text and "ㅇㅅ ㄱㄹㅅㄷㅇ" in card.text
+    assert "3/4" in card.text and "ㅇㅅ" not in card.text
+    assert card.text.count("＿") > stage2_blanks                 # 3단계는 빈칸이 더 많음
     await h.click(card, buttons(h, card)["다음 단계 ▶"])
     assert "암송해 보세요" in card.text
     await h.click(card, buttons(h, card)["👀 정답 보기"])
