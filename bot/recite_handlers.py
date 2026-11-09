@@ -25,8 +25,8 @@ from .config import ADMIN_ID
 from .quiz import parse_hours, quiz_streak
 from .recite import (COURSE, DAILY_CHOICES, DEFAULT_HOURS, GRADE_LABELS, ReciteStatus,
                      apply_grade, assign_slot, blanks, build_queue, chapter_board,
-                     chapter_icon, choseong, expected_finish, grade_typing, parse_recite_text,
-                     pending, queue_counts)
+                     chapter_icon, expected_finish, grade_typing, parse_recite_text,
+                     pending, queue_counts, toggle_mark, update_mark)
 
 log = logging.getLogger(__name__)
 rng = random.Random()
@@ -57,6 +57,25 @@ async def course_verses(r, course: str = COURSE) -> list[dict]:
     return verses
 
 
+async def load_marks(r, space_id: int) -> dict[int, dict]:
+    try:
+        return await r.recite_marks(space_id)
+    except Exception as e:   # schema_recite_exam.sql 실행 전
+        log.info("북마크 불러오기 실패: %s", e)
+        return {}
+
+
+async def save_mark(r, space_id: int, verse_id: int, mark: dict) -> None:
+    try:
+        await r.save_mark({"space_id": space_id, "verse_id": verse_id,
+                           **{k: mark[k] for k in ("bookmarked", "auto", "fails", "streak")}})
+    except Exception as e:
+        log.info("북마크 저장 실패: %s", e)
+
+
+MARK_TOAST = {"on": "⭐ 자주 틀려서 북마크했어요", "off": "⭐ 세 번 연속 완벽! 북마크를 해제했어요"}
+
+
 def _daykey(day: dt.date) -> str:
     return day.strftime("%Y%m%d")
 
@@ -82,7 +101,9 @@ async def ensure_day(r, space_id: int, member: dict, day: dt.date, verses=None) 
         return rec
     verses = verses if verses is not None else await course_verses(r, member.get("course", COURSE))
     cards = await r.recite_cards(space_id)
-    queue = build_queue(day, member["next_seq"], member["daily_new"], verses, cards, rng)
+    marks = await load_marks(r, space_id)
+    bookmarked = {vid for vid, m in marks.items() if m.get("bookmarked")}
+    queue = build_queue(day, member["daily_new"], verses, cards, rng, bookmarked)
     rec = {"space_id": space_id, "recite_date": day, "queue": queue, "sent_hours": []}
     await r.save_recite_day(rec)
     return rec
@@ -128,22 +149,25 @@ def _cb(day: dt.date, idx: int, act: str) -> str:
 
 
 def render_card(day: dt.date, queue: list[dict], idx: int, stage: str,
-                verse: dict, prev: dict | None):
+                verse: dict, prev: dict | None, bookmarked: bool = False):
     item = queue[idx]
     total, done = queue_counts(queue)
-    head = f"📖 <b>계시록 암송</b> · {KIND_LABEL[item['k']]} · 오늘 {done}/{total}"
+    star = " ⭐" if bookmarked else ""
+    head = f"📖 <b>계시록 암송</b> · {KIND_LABEL[item['k']]}{star} · 오늘 {done}/{total}"
     ref, body = escape(verse["ref"]), escape(verse["body"])
     rows = []
     if stage == "1":
-        text = f"{head}\n\n<b>{ref}</b>\n{body}\n\n<i>1/4 · 소리 내어 세 번 읽어 보세요.</i>"
-        rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "2"))]]
+        text = (f"{head}\n\n<b>{ref}</b>\n{body}\n\n<i>1/4 · 소리 내어 세 번 읽어 보세요.</i>"
+                f"\n<i>이미 외운 구절이면 ⏭ 바로 시험보기 — 완벽하면 7일 뒤 복습해요.</i>")
+        rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "2")),
+                 Btn("⏭ 바로 시험보기", callback_data=_cb(day, idx, "q"))]]
     elif stage == "2":
         text = (f"{head}\n\n<b>{ref}</b>\n{escape(blanks(verse['body'], verse['id']))}"
                 f"\n\n<i>2/4 · 빈칸을 채우며 읽어 보세요.</i>")
         rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "3"))]]
     elif stage == "3":
-        text = (f"{head}\n\n<b>{ref}</b>\n{escape(choseong(verse['body']))}"
-                f"\n\n<i>3/4 · 첫 글자만 보고 읽어 보세요.</i>")
+        text = (f"{head}\n\n<b>{ref}</b>\n{escape(blanks(verse['body'], verse['id'], hide=2))}"
+                f"\n\n<i>3/4 · 더 넓어진 빈칸을 채우며 읽어 보세요.</i>")
         rows = [[Btn("다음 단계 ▶", callback_data=_cb(day, idx, "4"))]]
     elif stage in ("4", "c"):
         if stage == "c" and prev:
@@ -158,7 +182,8 @@ def render_card(day: dt.date, queue: list[dict], idx: int, stage: str,
         text = f"{head}\n\n<b>{ref}</b>\n{body}\n\n얼마나 정확했나요?"
         rows = [[Btn("✅ 완벽", callback_data=_cb(day, idx, "g2")),
                  Btn("🔸 조금 틀림", callback_data=_cb(day, idx, "g1")),
-                 Btn("❌ 못 외움", callback_data=_cb(day, idx, "g0"))]]
+                 Btn("❌ 못 외움", callback_data=_cb(day, idx, "g0"))],
+                [Btn("⭐ 북마크 해제" if bookmarked else "☆ 북마크", callback_data=_cb(day, idx, "b"))]]
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -185,8 +210,10 @@ async def _verse_pair(r, member_course: str, verse_id: int):
 async def render_item(r, member: dict, day: dt.date, queue: list[dict], idx: int, stage: str):
     v, prev = await _verse_pair(r, member.get("course", COURSE), queue[idx]["v"])
     if v is None:   # 본문이 지워진 경우
-        return f"📖 이 카드의 본문을 찾을 수 없어요.", None
-    return render_card(day, queue, idx, stage, v, prev)
+        return "📖 이 카드의 본문을 찾을 수 없어요.", None
+    marks = await load_marks(r, member["space_id"])
+    return render_card(day, queue, idx, stage, v, prev,
+                       bookmarked=bool(marks.get(v["id"], {}).get("bookmarked")))
 
 
 def _next_in_slot(queue: list[dict], hour) -> int | None:
@@ -205,11 +232,16 @@ async def render_after(r, member, day, queue, hour, intro=None):
 # ---------------------------------------------------------------------------
 # 채점 (버튼·타이핑 공통)
 # ---------------------------------------------------------------------------
-async def grade_item(r, space_id: int, member: dict, rec: dict, idx: int, grade: int, day: dt.date):
+async def grade_item(r, space_id: int, member: dict, rec: dict, idx: int, grade: int,
+                     day: dt.date) -> str | None:
+    """채점 반영. 북마크가 자동으로 붙거나 풀리면 'on'/'off'를 돌려준다."""
     item = rec["queue"][idx]
     cards = {c["verse_id"]: c for c in await r.recite_cards(space_id)}
     card = cards.get(item["v"])
-    new_fields = apply_grade(card, grade, day)
+    mark = (await load_marks(r, space_id)).get(item["v"])
+    new_mark, event = update_mark(mark, grade)
+    known = item["k"] == "new" and bool(item.get("q"))   # 4단계 없이 바로 시험
+    new_fields = apply_grade(card, grade, day, known=known, bookmarked=new_mark["bookmarked"])
     await r.save_card({"space_id": space_id, "verse_id": item["v"],
                        "learned_on": card["learned_on"] if card else day, **new_fields})
     if item["k"] == "new" and member["next_seq"] <= item["seq"]:
@@ -219,6 +251,8 @@ async def grade_item(r, space_id: int, member: dict, rec: dict, idx: int, grade:
                              "started_on": member.get("started_on") or day})
     item["g"] = grade
     await r.save_recite_day(rec)
+    await save_mark(r, space_id, item["v"], new_mark)
+    return event
 
 
 # ---------------------------------------------------------------------------
@@ -273,9 +307,27 @@ async def on_recite_button(update: Update, context, space: dict, args: list[str]
 
     if act.startswith("g"):
         grade = int(act[1])
-        await grade_item(r, space["id"], member, rec, idx, grade, day)
-        await query.answer({2: "✅ 완벽!", 1: "🔸 조금만 더!", 0: "❌ 내일 다시 만나요"}[grade])
+        event = await grade_item(r, space["id"], member, rec, idx, grade, day)
+        await query.answer(MARK_TOAST.get(event)
+                           or {2: "✅ 완벽!", 1: "🔸 조금만 더!", 0: "❌ 내일 다시 만나요"}[grade])
         text, markup = await render_after(r, member, day, queue, item["s"])
+        await safe_edit(query, text, markup)
+        return
+
+    if act == "q":   # 바로 시험보기: 4단계를 건너뛰고 주소만 보고 암송
+        item["q"] = True
+        await r.save_recite_day(rec)
+        await query.answer()
+        text, markup = await render_item(r, member, day, queue, idx, "4")
+        await safe_edit(query, text, markup)
+        return
+
+    if act == "b":   # 북마크 켜고 끄기
+        marks = await load_marks(r, space["id"])
+        new_mark = toggle_mark(marks.get(item["v"]))
+        await save_mark(r, space["id"], item["v"], new_mark)
+        await query.answer("⭐ 북마크했어요" if new_mark["bookmarked"] else "북마크를 해제했어요")
+        text, markup = await render_item(r, member, day, queue, idx, "a")
         await safe_edit(query, text, markup)
         return
 
@@ -296,6 +348,23 @@ async def on_recite_button(update: Update, context, space: dict, args: list[str]
     await query.answer()
     text, markup = await render_item(r, member, day, queue, idx, act)
     await safe_edit(query, text, markup)
+
+
+async def reply_typing_result(context, space: dict, msg, verse: dict, result, event: str | None):
+    """타이핑 채점 결과를 답장으로 보내고, '답장으로 입력해 주세요' 안내 메시지는 지운다
+    (안내 메시지가 남아 있으면 답장 상태가 계속 잡히기 때문)."""
+    icon = {2: "✅", 1: "🔸", 0: "❌"}[result.grade]
+    extra = f"\n{MARK_TOAST[event]}" if event else ""
+    await msg.reply_text(
+        f"⌨️ <b>타이핑 채점</b> — 정확도 <b>{result.score:.0f}%</b> → {icon} {GRADE_LABELS[result.grade]}\n\n"
+        f"<b>{escape(verse['ref'])}</b>\n{result.diff_html}\n\n"
+        f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>{extra}")
+    prompt = getattr(msg, "reply_to_message", None)
+    if prompt is not None:
+        try:
+            await context.bot.delete_message(chat_id=space["chat_id"], message_id=prompt.message_id)
+        except Exception as e:
+            log.info("타이핑 안내 메시지 삭제 실패: %s", e)
 
 
 async def handle_typing(update: Update, context, space: dict, daykey: str, idx: int,
@@ -322,12 +391,8 @@ async def handle_typing(update: Update, context, space: dict, daykey: str, idx: 
         return
 
     result = grade_typing(typed, v["body"])
-    await grade_item(r, space["id"], member, rec, idx, result.grade, day)
-    icon = {2: "✅", 1: "🔸", 0: "❌"}[result.grade]
-    await msg.reply_text(
-        f"⌨️ <b>타이핑 채점</b> — 정확도 <b>{result.score:.0f}%</b> → {icon} {GRADE_LABELS[result.grade]}\n\n"
-        f"<b>{escape(v['ref'])}</b>\n{result.diff_html}\n\n"
-        f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>")
+    event = await grade_item(r, space["id"], member, rec, idx, result.grade, day)
+    await reply_typing_result(context, space, msg, v, result, event)
 
     text, markup = await render_after(r, member, day, rec["queue"], item["s"])
     try:
@@ -351,13 +416,16 @@ async def render_board(r, space: dict, member: dict, intro: str | None = None):
     today = dates.today()
     start, end = _hours(member)
     learned = len({c["verse_id"] for c in cards} & {v["id"] for v in verses})
+    passed = set(member.get("passed_chapters") or [])
+    marks = await load_marks(r, space["id"])
+    n_marks = sum(1 for m in marks.values() if m.get("bookmarked"))
     total = len(verses)
     lines = [intro, ""] if intro else []
     lines.append("📖 <b>계시록 암송</b>" + ("  ⏸ <i>쉬는 중</i>" if not member.get("active") else ""))
     lines.append(f"하루 새 구절 <b>{member['daily_new']}절</b> · 카드 시간 <b>{start}~{end}시</b>")
     if total:
         lines.append(f"진도 <b>{learned}/{total}절</b> ({learned / total * 100:.0f}%)")
-        finish = expected_finish(member["next_seq"], total, member["daily_new"], today)
+        finish = expected_finish(learned, total, member["daily_new"], today)
         if finish:
             lines.append(f"예상 완료 {finish.year}년 {finish.month}월 {finish.day}일쯤")
         else:
@@ -377,16 +445,20 @@ async def render_board(r, space: dict, member: dict, intro: str | None = None):
 
     board = chapter_board(verses, cards)
     if board:
-        lines += ["", "<b>장별 진도</b>  ✉️ 시작 전 · 📜 진행 중 · ✅ 다 익힘 · 🏅 단단히"]
+        lines += ["", "<b>장별 진도</b>  ✉️ 시작 전 · 📜 진행 중 · ✅ 다 익힘 · 🏅 시험 통과·단단히"]
         cells = []
         for ch, n, got, mastered in board:
-            icon = chapter_icon(n, got, mastered)
+            icon = chapter_icon(n, got, mastered, ch in passed)
             cells.append(f"{ch}장 {icon}" + (f"{got}/{n}" if icon == "📜" else ""))
         for i in range(0, len(cells), 4):
             lines.append("  ".join(cells[i:i + 4]))
 
     lines += ["", "• 시간 바꾸기 <code>/rv 19-22</code>",
+              "• 이미 외운 장은 <b>📝 장별 시험</b>으로 통과하면 진도에 바로 반영돼요.",
               "<i>하루 개수를 바꾸면 내일 카드부터 적용돼요.</i>"]
+    if total:
+        markup_rows.append([Btn("📝 장별 시험", callback_data="rs"),
+                            Btn(f"⭐ 북마크 ({n_marks})", callback_data="rk")])
     markup_rows.append([Btn(("✔ " if member["daily_new"] == n else "") + f"하루 {n}절",
                             callback_data=f"rv:n:{n}") for n in DAILY_CHOICES])
     markup_rows.append([Btn("⏸ 쉬기" if member.get("active") else "▶ 다시 시작", callback_data="rv:p")])
@@ -396,9 +468,10 @@ async def render_board(r, space: dict, member: dict, intro: str | None = None):
 INTRO = (
     "📖 <b>계시록 전문 암송</b>\n\n"
     "매일 저녁 시간대에 나눠서 <b>새 구절</b>과 <b>복습 카드</b>를 보내 드려요.\n"
-    "• 새 구절: 전문 → 빈칸 → 초성 → 주소만 보고 떠올리기\n"
+    "• 새 구절: 전문 → 빈칸 → 더 넓은 빈칸 → 주소만 보고 떠올리기\n"
     "• 복습: 잊을 때쯤 다시 (1·3·7·15·30·60일 간격)\n"
-    "• 채점: 정답 보고 스스로, 또는 ⌨️ 타이핑으로\n\n"
+    "• 채점: 정답 보고 스스로, 또는 ⌨️ 타이핑으로\n"
+    "• 이미 외운 장은 <code>/rv 시험</code>으로 시험 보고 통과하면 건너뛰어요\n\n"
     "하루에 몇 절씩 외울까요?\n"
     "<i>1절 약 13개월 · 2절 약 7개월 · 3절 약 4.5개월</i>"
 )
@@ -410,6 +483,18 @@ async def cmd_recite(update: Update, context):
     msg = update.effective_message
     arg = " ".join(context.args or []).strip().lower()
     member = await r.get_member(space["id"])
+
+    if arg.startswith("시험") or arg.startswith("북마크"):
+        from . import recite_exam
+        if not member:
+            await msg.reply_text("📖 먼저 <code>/rv</code>로 암송을 시작해 주세요.")
+            return
+        if arg.startswith("북마크"):
+            text, markup = await recite_exam.render_bookmarks(r, space)
+        else:
+            text, markup = await recite_exam.exam_entry(r, space, member, arg[2:].strip())
+        await msg.reply_text(text, reply_markup=markup)
+        return
 
     if not member:
         if arg in {str(n) for n in DAILY_CHOICES}:
@@ -528,7 +613,7 @@ async def cmd_recite_status(update: Update, context):
         space = await r.space_by_id(m["space_id"])
         if not space:
             continue
-        learned = max(0, m["next_seq"] - 1)
+        learned = len(await r.recite_cards(space["id"]))
         rec = await r.get_recite_day(space["id"], today)
         t, d = queue_counts(rec["queue"]) if rec else (0, 0)
         name = escape(space.get("name") or "")

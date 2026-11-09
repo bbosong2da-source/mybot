@@ -6,7 +6,8 @@ import pytest
 
 from bot import dates, handlers, jobs, quiz_handlers, recite_handlers
 from bot.recite import (MAX_REVIEWS, apply_grade, assign_slot, blanks, build_queue, chapter_board,
-                        chapter_icon, choseong, expected_finish, grade_typing, parse_recite_text)
+                        chapter_icon, choseong, exam_card_update, exam_summary, expected_finish,
+                        grade_typing, parse_recite_text, toggle_mark, update_mark)
 from test_flow import FakeMessage, Harness
 from test_quiz import ADMIN
 
@@ -37,6 +38,12 @@ def test_choseong_and_blanks():
     assert b == blanks(text, seed=1)                  # 같은 구절은 늘 같은 자리
     assert b.count("＿") > 0 and len(b.split()) == len(text.split())
     assert sum("＿" in w for w in b.split()) == 3     # 7단어 중 세 개 중 하나꼴
+    wide = blanks(text, seed=1, hide=2)
+    hidden1 = {i for i, w in enumerate(b.split()) if "＿" in w}
+    hidden2 = {i for i, w in enumerate(wide.split()) if "＿" in w}
+    assert hidden1 < hidden2 and len(hidden2) == 5                # 2단계 빈칸 + 더 가림 (7단어 중 5개)
+    assert wide.split()[1] == "＿＿＿＿"                          # 빈칸 길이 = 글자 수 힌트 (그리스도의 → 4칸)
+    assert wide.split()[0] in ("예수", "＿＿")
 
 
 def _verses(n=30):
@@ -49,18 +56,26 @@ def test_build_queue_new_then_due_reviews():
     cards = [{"verse_id": 100 + i, "box": i % 3, "due_date": day - dt.timedelta(days=i % 4)}
              for i in range(1, 21)]
     cards.append({"verse_id": 125, "box": 0, "due_date": day + dt.timedelta(days=1)})   # 아직 아님
-    q = build_queue(day, 21, 2, vs, cards, random.Random(0))
-    assert [x["seq"] for x in q[:2]] == [21, 22] and all(x["k"] == "new" for x in q[:2])
+    q = build_queue(day, 2, vs, cards, random.Random(0))
+    # 새 구절: 안 외운 절 중 가장 앞 (25절은 이미 외워서 건너뜀)
+    assert [(x["seq"], x["k"]) for x in q[:2]] == [(21, "new"), (22, "new")]
+    q3 = build_queue(day, 5, vs, cards, random.Random(0))
+    assert [x["seq"] for x in q3 if x["k"] == "new"] == [21, 22, 23, 24, 26]
     reviews = q[2:]
     assert len(reviews) == MAX_REVIEWS                # 밀린 복습은 하루 최대 15개
     assert 25 not in [x["seq"] for x in reviews]
     assert {x["k"] for x in reviews} <= {"recall", "chain"}
     assert all(x["g"] is None and x["s"] is None for x in q)
+    # 북마크한 구절은 복습 상한 안에 먼저 들어감
+    late = {20, 19, 18}
+    qb = build_queue(day, 0, vs, cards, random.Random(0), bookmarked={100 + i for i in late})
+    assert {x["seq"] for x in qb[:3]} == late
     # 1절은 앞 구절이 없으니 이어 말하기가 될 수 없음
-    q = build_queue(day, 2, 1, vs, [{"verse_id": 101, "box": 0, "due_date": day}], random.Random(3))
-    assert q[1]["k"] == "recall"
+    q = build_queue(day, 1, vs, [{"verse_id": 101, "box": 0, "due_date": day}], random.Random(3))
+    assert q[0]["seq"] == 2 and q[1]["k"] == "recall"
     # 끝까지 다 배우면 새 구절 없음
-    assert build_queue(day, 31, 3, vs, [], random.Random(0)) == []
+    every = [{"verse_id": v["id"], "box": 0, "due_date": day + dt.timedelta(days=9)} for v in vs]
+    assert build_queue(day, 3, vs, every, random.Random(0)) == []
 
 
 def test_apply_grade_intervals():
@@ -116,8 +131,45 @@ def test_chapter_board_and_finish():
     assert board == [(1, 10, 10, 10), (2, 10, 1, 0)]
     assert chapter_icon(*board[0][1:]) == "🏅" and chapter_icon(*board[1][1:]) == "📜"
     assert chapter_icon(5, 5, 2) == "✅" and chapter_icon(5, 0, 0) == "✉️"
-    assert expected_finish(1, 404, 2, NOV7) == NOV7 + dt.timedelta(days=201)
-    assert expected_finish(405, 404, 2, NOV7) is None
+    assert expected_finish(0, 404, 2, NOV7) == NOV7 + dt.timedelta(days=201)
+    assert expected_finish(404, 404, 2, NOV7) is None
+    assert chapter_icon(5, 1, 0, passed=True) == "🏅"
+
+
+def test_known_and_bookmark_intervals():
+    d = NOV7
+    assert apply_grade(None, 2, d, known=True)["due_date"] == d + dt.timedelta(days=7)
+    assert apply_grade(None, 1, d, known=True)["due_date"] == d + dt.timedelta(days=1)
+    assert apply_grade({"box": 4}, 2, d, bookmarked=True)["due_date"] == d + dt.timedelta(days=3)
+    assert exam_card_update(None, 0, d) is None              # 안 외운 절 '못 외움' → 등록 안 함
+    assert exam_card_update(None, 2, d)["box"] == 2
+    assert exam_card_update({"box": 3}, 0, d)["box"] == 0
+
+
+def test_bookmark_rules():
+    m, ev = update_mark(None, 0)
+    assert not m["bookmarked"] and ev is None
+    m, ev = update_mark(m, 1)
+    m, ev = update_mark(m, 0)
+    assert m["bookmarked"] and m["auto"] and ev == "on"        # 못 외움 2번 → 자동 북마크
+    for _ in range(2):
+        m, ev = update_mark(m, 2)
+        assert m["bookmarked"]
+    m, ev = update_mark(m, 1)                                   # 연속이 끊김
+    for _ in range(3):
+        m, ev = update_mark(m, 2)
+    assert not m["bookmarked"] and ev == "off" and m["fails"] == 0
+    m = toggle_mark(None)
+    assert m["bookmarked"] and not m["auto"]
+    assert not toggle_mark(m)["bookmarked"]
+
+
+def test_exam_summary():
+    items = [{"g": 2}] * 9 + [{"g": 1}]
+    s = exam_summary(items)
+    assert s.finished and s.passed and (s.perfect, s.partial) == (9, 1)
+    assert not exam_summary([{"g": 2}] * 8 + [{"g": 0}] * 2).passed
+    assert not exam_summary([{"g": 2}] * 9 + [{"g": None}]).passed
 
 
 # --- 사용 흐름 ----------------------------------------------------------------
@@ -183,8 +235,10 @@ async def test_start_and_full_evening(h, monkeypatch):
     b = buttons(h, card)
     await h.click(card, b["다음 단계 ▶"])
     assert "2/4" in card.text and "＿" in card.text
+    stage2_blanks = card.text.count("＿")
     await h.click(card, buttons(h, card)["다음 단계 ▶"])
-    assert "3/4" in card.text and "ㅇㅅ ㄱㄹㅅㄷㅇ" in card.text
+    assert "3/4" in card.text and "ㅇㅅ" not in card.text
+    assert card.text.count("＿") > stage2_blanks                 # 3단계는 빈칸이 더 많음
     await h.click(card, buttons(h, card)["다음 단계 ▶"])
     assert "암송해 보세요" in card.text
     await h.click(card, buttons(h, card)["👀 정답 보기"])

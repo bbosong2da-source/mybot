@@ -16,6 +16,7 @@ callback_data 규칙 (64바이트 제한, 항목은 인덱스가 아닌 DB id로
   bc:{bid}:{idx}     공지 과제 토글
   qz:{qid}:{idx}     성구 퀴즈 답 선택 / qz:i 퀴즈 루틴 안내
   rc:* / rv:*        계시록 암송 카드 / 진도판 (recite_handlers.py 맨 위 설명 참고)
+  rs / ex:* / rk / rb:*  장별 시험 · 북마크 (recite_exam.py 맨 위 설명 참고)
   cx:{id}            다 끝내서 접힌 섹션 펼치기 (그 섹션의 할 일 id로 섹션을 찾음)
 """
 from __future__ import annotations

@@ -44,6 +44,7 @@ CHEERS = [
 
 MARKER_RE = re.compile(r"#([TRS])(\d+)\b")
 TYPING_RE = re.compile(r"#V(\d{8})-(\d+)-(\d+)\b")
+EXAM_TYPING_RE = re.compile(r"#X(\d+)-(\d+)-(\d+)\b")
 CATEGORY_RE = re.compile(r"^\[\s*([^\]]{1,30}?)\s*\]\s*(.*)$")
 
 
@@ -151,6 +152,12 @@ async def handle_message(update: Update, context):
     # 1) 봇의 '이름 변경' 또는 '질문' 메시지에 단 답장
     reply = msg.reply_to_message
     if reply and reply.from_user and reply.from_user.id == context.bot.id and reply.text:
+        x = EXAM_TYPING_RE.search(reply.text)
+        if x:   # 계시록 장별 시험 타이핑 채점
+            from .recite_exam import handle_exam_typing
+            await handle_exam_typing(update, context, space, int(x.group(1)), int(x.group(2)),
+                                     int(x.group(3)), text)
+            return
         t = TYPING_RE.search(reply.text)
         if t:   # 계시록 암송 타이핑 채점
             from .recite_handlers import handle_typing

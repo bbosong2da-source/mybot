@@ -258,6 +258,38 @@ class SupabaseRepo:
         return await self._run(lambda: self._t("recite_days").select("recite_date,queue")
                                .eq("space_id", space_id).gte("recite_date", since.isoformat()))
 
+    # --- 암송 북마크·장별 시험 ---------------------------------------------
+    async def recite_marks(self, space_id: int) -> dict[int, dict]:
+        rows = await self._run(lambda: self._t("recite_marks").select("*").eq("space_id", space_id))
+        return {r["verse_id"]: r for r in rows}
+
+    async def save_mark(self, row: dict) -> None:
+        await self._run(lambda: self._t("recite_marks").upsert(row, on_conflict="space_id,verse_id"))
+
+    async def create_exam(self, row: dict) -> dict:
+        rows = await self._run(lambda: self._t("recite_exams").insert(_to_db(row)))
+        return rows[0]
+
+    async def get_exam(self, space_id: int, exam_id: int) -> dict | None:
+        rows = await self._run(lambda: self._t("recite_exams").select("*")
+                               .eq("space_id", space_id).eq("id", exam_id))
+        return rows[0] if rows else None
+
+    async def save_exam(self, row: dict) -> None:
+        fields = {k: v for k, v in row.items() if k in ("items", "finished")}
+        await self._run(lambda: self._t("recite_exams").update(fields)
+                        .eq("space_id", row["space_id"]).eq("id", row["id"]))
+
+    async def open_exam(self, space_id: int, kind: str, chapter: int | None) -> dict | None:
+        """이어서 볼 수 있는(끝나지 않은) 같은 종류의 시험."""
+        def q():
+            b = (self._t("recite_exams").select("*").eq("space_id", space_id)
+                 .eq("kind", kind).eq("finished", False))
+            b = b.eq("chapter", chapter) if chapter is not None else b.is_("chapter", "null")
+            return b.order("id", desc=True).limit(1)
+        rows = await self._run(q)
+        return rows[0] if rows else None
+
 
 class MemoryRepo:
     def __init__(self):
@@ -275,6 +307,8 @@ class MemoryRepo:
         self.members: dict[int, dict] = {}
         self.cards: dict[tuple[int, int], dict] = {}
         self.rdays: dict[tuple[int, dt.date], dict] = {}
+        self.marks: dict[tuple[int, int], dict] = {}
+        self.exams: dict[int, dict] = {}
         self._ids = itertools.count(1)
 
     def _new(self, row: dict, **defaults) -> dict:
@@ -489,3 +523,33 @@ class MemoryRepo:
 
     async def recite_days_since(self, space_id, since):
         return [dict(d) for (sid, day), d in self.rdays.items() if sid == space_id and day >= since]
+
+    # --- 암송 북마크·장별 시험 ---------------------------------------------
+    async def recite_marks(self, space_id):
+        return {vid: dict(m) for (sid, vid), m in self.marks.items() if sid == space_id}
+
+    async def save_mark(self, row):
+        self.marks.setdefault((row["space_id"], row["verse_id"]), {}).update(row)
+
+    async def create_exam(self, row):
+        e = self._new({**row, "items": [dict(i) for i in row["items"]]}, finished=False)
+        self.exams[e["id"]] = e
+        return {**e, "items": [dict(i) for i in e["items"]]}
+
+    async def get_exam(self, space_id, exam_id):
+        e = self.exams.get(exam_id)
+        if not e or e["space_id"] != space_id:
+            return None
+        return {**e, "items": [dict(i) for i in e["items"]]}
+
+    async def save_exam(self, row):
+        e = self.exams[row["id"]]
+        e.update(items=[dict(i) for i in row["items"]], finished=row["finished"])
+
+    async def open_exam(self, space_id, kind, chapter):
+        found = [e for e in self.exams.values() if e["space_id"] == space_id and e["kind"] == kind
+                 and e.get("chapter") == chapter and not e["finished"]]
+        if not found:
+            return None
+        e = max(found, key=lambda e: e["id"])
+        return {**e, "items": [dict(i) for i in e["items"]]}
