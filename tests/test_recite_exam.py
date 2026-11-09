@@ -134,10 +134,34 @@ async def test_exam_typing_and_prompt_deleted(h, monkeypatch):
     prompt = h.bot.last
     assert "#X" in prompt.text
     reply = await h.say("에베소 교회의 사자에게 편지하라", reply_to=prompt)
-    assert "정확도 <b>100%</b>" in reply.text and "완벽" in reply.text
-    assert prompt.message_id in h.bot.deleted                  # 답장 안내 메시지 삭제
-    assert "2장 시험 결과" in msg.text and h.repo.members[h.sid]["passed_chapters"] == [2]
+    assert "정확도 <b>100%</b>" in reply.text and "완벽" in reply.text and "2장 통과!" in reply.text
+    assert prompt.message_id in h.bot.deleted and msg.message_id in h.bot.deleted
+    assert h.repo.members[h.sid]["passed_chapters"] == [2]
     assert not h.repo.tasks
+    await h.click(reply, buttons(h, reply)["📊 결과 보기"])
+    assert "2장 시험 결과" in reply.text and len(h.bot.deleted) == 3
+
+
+async def test_exam_typing_next_verse_keeps_one_message(h, monkeypatch):
+    bodies = {v["ref"]: v["body"] for v in h.repo.rverses.values()}
+    msg = await h.say("/rv 시험 1", handler=recite_handlers.cmd_recite, args=["시험", "1"])
+    card = msg
+    for n, ref in enumerate(CH1):
+        await h.click(card, buttons(h, card)["⌨️ 타이핑으로 확인"])
+        prompt = h.bot.last
+        before = set(getattr(h.bot, "deleted", []))
+        result = await h.say(bodies[ref], reply_to=prompt)
+        assert {card.message_id, prompt.message_id} <= set(h.bot.deleted) - before
+        label = "📊 결과 보기" if n == len(CH1) - 1 else "다음 절 ▶"
+        typed_cb = buttons(h, result)[label]
+        await h.click(result, typed_cb)
+        assert int(typed_cb.split(":")[-1]) in h.bot.deleted   # 내가 보낸 답 메시지 삭제
+        card = result                                          # 채점 카드가 다음 문제로 바뀜
+        if label == "다음 절 ▶":
+            assert f"{n + 2}/4" in card.text and CH1[n + 1] in card.text
+    assert "1장 시험 결과" in card.text and "통과!" in card.text
+    alive = [m for m in h.bot.sent if m.message_id not in h.bot.deleted and "1장 시험" in (m.text or "")]
+    assert alive == [card]                                     # 시험 메시지는 하나만 남음
 
 
 async def test_daily_typing_prompt_deleted(h, monkeypatch):

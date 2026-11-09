@@ -299,6 +299,13 @@ async def on_recite_button(update: Update, context, space: dict, args: list[str]
         await query.answer("카드를 찾을 수 없어요.")
         return
     item = queue[idx]
+    if act == "n":   # 타이핑 채점 결과 → 내가 보낸 답 메시지를 지우고 이 카드를 다음 카드로
+        if len(args) > 3 and args[3].isdigit():
+            await delete_quietly(context, space["chat_id"], int(args[3]))
+        await query.answer()
+        text, markup = await render_after(r, member, day, queue, item["s"])
+        await safe_edit(query, text, markup)
+        return
     if item["g"] is not None:
         await query.answer("이미 마친 카드예요.")
         text, markup = await render_after(r, member, day, queue, item["s"])
@@ -350,26 +357,46 @@ async def on_recite_button(update: Update, context, space: dict, args: list[str]
     await safe_edit(query, text, markup)
 
 
-async def reply_typing_result(context, space: dict, msg, verse: dict, result, event: str | None):
-    """타이핑 채점 결과를 답장으로 보내고, '답장으로 입력해 주세요' 안내 메시지는 지운다
-    (안내 메시지가 남아 있으면 답장 상태가 계속 잡히기 때문)."""
+async def delete_quietly(context, chat_id: int, message_id: int) -> bool:
+    """메시지 삭제. 그룹에서 남의 메시지는 봇이 '메시지 삭제' 권한이 있는 관리자일 때만 지울 수 있다."""
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        return True
+    except Exception as e:
+        log.info("메시지 삭제 실패 (%s): %s", message_id, e)
+        return False
+
+
+async def retire_card(context, space: dict, card_msg_id: int) -> None:
+    """타이핑으로 채점한 뒤 위쪽의 원래 카드는 지운다 (못 지우면 버튼만 없앤다)."""
+    if not await delete_quietly(context, space["chat_id"], card_msg_id):
+        try:
+            await context.bot.edit_message_text(chat_id=space["chat_id"], message_id=card_msg_id,
+                                                text="⌨️ <i>타이핑으로 확인했어요 ↓</i>", reply_markup=None)
+        except Exception:
+            pass
+
+
+async def reply_typing_result(context, space: dict, msg, verse: dict, result, event: str | None,
+                              next_cb: str, next_label: str, note: str = ""):
+    """타이핑 채점 결과 카드. [다음 ▶]을 누르면 내가 보낸 답 메시지를 지우고 이 카드가 다음 문제로 바뀐다.
+    '답장으로 입력해 주세요' 안내 메시지는 바로 지운다 (남아 있으면 답장 상태가 계속 잡히기 때문)."""
     icon = {2: "✅", 1: "🔸", 0: "❌"}[result.grade]
     extra = f"\n{MARK_TOAST[event]}" if event else ""
-    await msg.reply_text(
+    await send_to_space(
+        context.bot, space,
         f"⌨️ <b>타이핑 채점</b> — 정확도 <b>{result.score:.0f}%</b> → {icon} {GRADE_LABELS[result.grade]}\n\n"
         f"<b>{escape(verse['ref'])}</b>\n{result.diff_html}\n\n"
-        f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>{extra}")
+        f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>{extra}{note}",
+        InlineKeyboardMarkup([[Btn(next_label, callback_data=next_cb)]]))
     prompt = getattr(msg, "reply_to_message", None)
     if prompt is not None:
-        try:
-            await context.bot.delete_message(chat_id=space["chat_id"], message_id=prompt.message_id)
-        except Exception as e:
-            log.info("타이핑 안내 메시지 삭제 실패: %s", e)
+        await delete_quietly(context, space["chat_id"], prompt.message_id)
 
 
 async def handle_typing(update: Update, context, space: dict, daykey: str, idx: int,
                         card_msg_id: int, typed: str):
-    """타이핑 답장 채점. 채점 결과를 답장으로 보내고, 원래 카드 메시지는 다음 카드로 바꾼다."""
+    """타이핑 답장 채점. 원래 카드는 지우고, 채점 결과 카드에 [다음 카드 ▶]을 붙인다."""
     r = repo(context)
     msg = update.effective_message
     day = _parse_daykey(daykey)
@@ -392,15 +419,11 @@ async def handle_typing(update: Update, context, space: dict, daykey: str, idx: 
 
     result = grade_typing(typed, v["body"])
     event = await grade_item(r, space["id"], member, rec, idx, result.grade, day)
-    await reply_typing_result(context, space, msg, v, result, event)
-
-    text, markup = await render_after(r, member, day, rec["queue"], item["s"])
-    try:
-        await context.bot.edit_message_text(chat_id=space["chat_id"], message_id=card_msg_id,
-                                            text=text, reply_markup=markup)
-    except Exception as e:
-        log.info("카드 메시지 갱신 실패: %s", e)
-        await send_to_space(context.bot, space, text, markup)
+    await retire_card(context, space, card_msg_id)
+    has_next = _next_in_slot(rec["queue"], item["s"]) is not None
+    await reply_typing_result(context, space, msg, v, result, event,
+                              _cb(day, idx, f"n:{msg.message_id}"),
+                              "다음 카드 ▶" if has_next else "확인 ✔")
 
 
 # ---------------------------------------------------------------------------

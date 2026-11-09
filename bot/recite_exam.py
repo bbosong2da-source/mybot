@@ -24,8 +24,8 @@ from . import dates
 from .common import repo, safe_edit, send_to_space
 from .recite import (COURSE, PASS_RATE, chapter_board, chapter_icon, exam_card_update,
                      exam_summary, grade_typing, toggle_mark, update_mark)
-from .recite_handlers import (MARK_TOAST, course_verses, load_marks, reply_typing_result,
-                              save_mark)
+from .recite_handlers import (MARK_TOAST, course_verses, delete_quietly, load_marks,
+                              reply_typing_result, retire_card, save_mark)
 
 MAX_BOOKMARK_BUTTONS = 15
 
@@ -272,6 +272,13 @@ async def on_ex(update: Update, context, space: dict, args: list[str]):
                                f"다음에 이어서 볼 수 있어요.",
                         InlineKeyboardMarkup([[Btn("▶ 이어서 하기", callback_data=_restart_cb(exam))]]))
         return
+    if act == "n":   # 타이핑 채점 결과 → 내가 보낸 답 메시지를 지우고 이 카드를 다음 절로
+        if len(args) > 3 and args[3].isdigit():
+            await delete_quietly(context, space["chat_id"], int(args[3]))
+        await query.answer()
+        text, markup = await _show_current(r, space, exam)
+        await safe_edit(query, text, markup)
+        return
     if item["g"] is not None or verse is None:
         await query.answer("이미 채점한 문제예요.")
         text, markup = await _show_current(r, space, exam)
@@ -330,13 +337,12 @@ async def handle_exam_typing(update: Update, context, space: dict, exam_id: int,
         return
     result = grade_typing(typed, verse["body"])
     event, newly_passed = await grade_exam(r, space, member, exam, idx, result.grade)
-    await reply_typing_result(context, space, msg, verse, result, event)
-    text, markup = await _show_current(r, space, exam, newly_passed=newly_passed)
-    try:
-        await context.bot.edit_message_text(chat_id=space["chat_id"], message_id=card_msg_id,
-                                            text=text, reply_markup=markup)
-    except Exception:
-        await send_to_space(context.bot, space, text, markup)
+    await retire_card(context, space, card_msg_id)
+    has_next = _next_idx(exam) is not None
+    note = f"\n\n🏅 <b>{exam['chapter']}장 통과!</b>" if newly_passed else ""
+    await reply_typing_result(context, space, msg, verse, result, event,
+                              _cb(exam, idx, f"n:{msg.message_id}"),
+                              "다음 절 ▶" if has_next else "📊 결과 보기", note)
 
 
 async def on_rk(update: Update, context, space: dict, args: list[str]):
