@@ -293,7 +293,11 @@ async def test_typing_check(h, monkeypatch):
     reply = await h.say("예수 그리스도의 계시라 이는 하나님이 그에게 주사 반드시 일어날 일들을", reply_to=prompt)
     assert "정확도" in reply.text and "조금 틀림" in reply.text and "<u>속히</u>" in reply.text
     assert not h.repo.tasks                                   # 답장은 할 일로 등록되지 않음
-    assert "오늘 암송 완료" in card.text                      # 원래 카드 메시지가 다음 상태로
+    assert card.message_id in h.bot.deleted                   # 위쪽 원래 카드는 지움
+    assert prompt.message_id in h.bot.deleted                 # 답장 안내도 지움
+    await h.click(reply, buttons(h, reply)["확인 ✔"])         # 하루 1절 → 마지막 카드
+    assert "오늘 암송 완료" in reply.text                     # 채점 카드가 다음 상태로 바뀜
+    assert len(h.bot.deleted) == 3                             # 내가 보낸 답 메시지까지 지움
     reply = await h.say("다시 입력", reply_to=prompt)
     assert "이미 채점한 카드" in reply.text
 
