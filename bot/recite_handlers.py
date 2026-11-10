@@ -378,7 +378,8 @@ async def retire_card(context, space: dict, card_msg_id: int) -> None:
 
 
 async def reply_typing_result(context, space: dict, msg, verse: dict, result, event: str | None,
-                              next_cb: str, next_label: str, note: str = ""):
+                              next_cb: str, next_label: str, note: str = "",
+                              extra_buttons: list | None = None):
     """타이핑 채점 결과 카드. [다음 ▶]을 누르면 내가 보낸 답 메시지를 지우고 이 카드가 다음 문제로 바뀐다.
     '답장으로 입력해 주세요' 안내 메시지는 바로 지운다 (남아 있으면 답장 상태가 계속 잡히기 때문)."""
     icon = {2: "✅", 1: "🔸", 0: "❌"}[result.grade]
@@ -388,7 +389,7 @@ async def reply_typing_result(context, space: dict, msg, verse: dict, result, ev
         f"⌨️ <b>타이핑 채점</b> — 정확도 <b>{result.score:.0f}%</b> → {icon} {GRADE_LABELS[result.grade]}\n\n"
         f"<b>{escape(verse['ref'])}</b>\n{result.diff_html}\n\n"
         f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>{extra}{note}",
-        InlineKeyboardMarkup([[Btn(next_label, callback_data=next_cb)]]))
+        InlineKeyboardMarkup([[Btn(next_label, callback_data=next_cb)] + (extra_buttons or [])]))
     prompt = getattr(msg, "reply_to_message", None)
     if prompt is not None:
         await delete_quietly(context, space["chat_id"], prompt.message_id)

@@ -10,6 +10,7 @@
 callback_data
   rs             장 고르기          rs:{장}  그 장 시험 (이어서)      rs:b  북마크만 시험
   ex:{시험id}:{번호}:{act}           act: a 정답 보기 · g0/g1/g2 채점 · t 타이핑 · b 북마크 · s 그만하기
+                                     n 다음 절(바로 타이핑할 수 있게 답장 입력창을 연 문제를 보냄)
   rk             북마크 목록        rb:{구절id}  북마크 해제
 """
 from __future__ import annotations
@@ -162,6 +163,34 @@ async def start_exam(r, space: dict, member: dict, kind: str, chapter: int | Non
     return exam, False
 
 
+async def _next_verse(r, exam: dict):
+    """다음에 풀 (번호, 구절). 본문이 지워진 절은 완벽 처리하고 건너뛴다. 다 풀었으면 (None, None)."""
+    by_id = {v["id"]: v for v in await course_verses(r)}
+    while (idx := _next_idx(exam)) is not None:
+        verse = by_id.get(exam["items"][idx]["v"])
+        if verse:
+            return idx, verse
+        exam["items"][idx]["g"] = 2
+        await r.save_exam(exam)
+    return None, None
+
+
+async def send_typing_question(context, space: dict, exam: dict, idx: int, verse: dict, user=None):
+    """답장 입력창이 열린 상태로 문제를 보낸다 (버튼을 누르지 않고 바로 입력해서 전송).
+    이 메시지 자체가 답장 대상이므로 표시의 카드 번호는 0."""
+    marks = await load_marks(repo(context), space["id"])
+    star = " ⭐" if marks.get(verse["id"], {}).get("bookmarked") else ""
+    mention = f'<a href="tg://user?id={user.id}">{escape(user.first_name)}</a>님, ' if user else ""
+    await send_to_space(
+        context.bot, space,
+        f"📝 <b>{_title(exam)}</b> · {idx + 1}/{len(exam['items'])}{star}\n\n"
+        f"⌨️ {mention}<b>{escape(verse['ref'])}</b>을 암송해서 이 메시지에 <b>답장</b>으로 보내 주세요.\n"
+        f"<i>띄어쓰기와 문장부호는 채점하지 않아요.</i>\n"
+        f"<code>#X{exam['id']}-{idx}-0</code>",
+        ForceReply(selective=True, input_field_placeholder=f"{verse['ref']} 입력"),
+    )
+
+
 async def _show_current(r, space: dict, exam: dict, intro: str | None = None, newly_passed=False):
     by_id = {v["id"]: v for v in await course_verses(r)}
     idx = _next_idx(exam)
@@ -266,18 +295,26 @@ async def on_ex(update: Update, context, space: dict, args: list[str]):
     verse = by_id.get(item["v"])
 
     if act == "s":
+        if len(args) > 3 and args[3].isdigit():
+            await delete_quietly(context, space["chat_id"], int(args[3]))
         await query.answer()
         done = sum(i["g"] is not None for i in exam["items"])
         await safe_edit(query, f"⏸ <b>{_title(exam)}</b>을 멈췄어요 ({done}/{len(exam['items'])}).\n"
                                f"다음에 이어서 볼 수 있어요.",
                         InlineKeyboardMarkup([[Btn("▶ 이어서 하기", callback_data=_restart_cb(exam))]]))
         return
-    if act == "n":   # 타이핑 채점 결과 → 내가 보낸 답 메시지를 지우고 이 카드를 다음 절로
+    if act == "n":   # 타이핑 채점 결과 → [다음 절 ▶]
         if len(args) > 3 and args[3].isdigit():
-            await delete_quietly(context, space["chat_id"], int(args[3]))
+            await delete_quietly(context, space["chat_id"], int(args[3]))   # 내가 보낸 답
         await query.answer()
-        text, markup = await _show_current(r, space, exam)
-        await safe_edit(query, text, markup)
+        nidx, nverse = await _next_verse(r, exam)
+        if nidx is None:   # 마지막 절이었으면 이 카드를 결과로
+            text, markup = await _show_current(r, space, exam)
+            await safe_edit(query, text, markup)
+            return
+        # 답장 입력창이 열린 메시지는 버튼을 달 수 없어서 수정 대신 새로 보낸다
+        await delete_quietly(context, space["chat_id"], query.message.message_id)
+        await send_typing_question(context, space, exam, nidx, nverse, query.from_user)
         return
     if item["g"] is not None or verse is None:
         await query.answer("이미 채점한 문제예요.")
@@ -337,12 +374,14 @@ async def handle_exam_typing(update: Update, context, space: dict, exam_id: int,
         return
     result = grade_typing(typed, verse["body"])
     event, newly_passed = await grade_exam(r, space, member, exam, idx, result.grade)
-    await retire_card(context, space, card_msg_id)
+    if card_msg_id:   # 0이면 문제 메시지 자체에 답한 것 (아래에서 답장 대상으로 지움)
+        await retire_card(context, space, card_msg_id)
     has_next = _next_idx(exam) is not None
     note = f"\n\n🏅 <b>{exam['chapter']}장 통과!</b>" if newly_passed else ""
+    stop = [Btn("⏸ 그만하기", callback_data=_cb(exam, idx, f"s:{msg.message_id}"))] if has_next else []
     await reply_typing_result(context, space, msg, verse, result, event,
                               _cb(exam, idx, f"n:{msg.message_id}"),
-                              "다음 절 ▶" if has_next else "📊 결과 보기", note)
+                              "다음 절 ⌨️ ▶" if has_next else "📊 결과 보기", note, stop)
 
 
 async def on_rk(update: Update, context, space: dict, args: list[str]):
