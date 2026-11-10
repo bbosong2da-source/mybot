@@ -211,3 +211,38 @@ async def test_routine_delete_buttons_still_work(h):
     rid = next(iter(h.repo.routines_))
     await h.click(mgr, f"rx:{rid}")
     assert "삭제할까요" in mgr.text
+
+
+async def test_bookmark_from_exam_typing_result(h, monkeypatch):
+    bodies = {v["ref"]: v["body"] for v in h.repo.rverses.values()}
+    card = await h.say("/rv 시험 1", handler=recite_handlers.cmd_recite, args=["시험", "1"])
+    await h.click(card, buttons(h, card)["⌨️ 타이핑으로 확인"])
+    result = await h.say(bodies["계 1:1"], reply_to=h.bot.last)
+    text_before = result.text
+    q = await h.click(result, buttons(h, result)["☆ 북마크"])
+    assert q.answers == ["⭐ 북마크했어요"]
+    assert h.repo.marks[(h.sid, h.vid["계 1:1"])]["bookmarked"]
+    assert result.text == text_before                          # 채점 내용은 그대로
+    b = buttons(h, result)
+    assert "⭐ 북마크 해제" in b and "다음 절 ⌨️ ▶" in b and "⏸ 그만하기" in b
+    await h.click(result, b["⭐ 북마크 해제"])
+    assert not h.repo.marks[(h.sid, h.vid["계 1:1"])]["bookmarked"]
+    await h.click(result, buttons(h, result)["☆ 북마크"])
+    await h.click(result, buttons(h, result)["다음 절 ⌨️ ▶"])   # 다음 절도 그대로 동작
+    assert "계 1:2" in h.bot.last.text and "#X" in h.bot.last.text
+    lst = await h.say("/rv 북마크", handler=recite_handlers.cmd_recite, args=["북마크"])
+    assert "계 1:1" in lst.text
+
+
+async def test_bookmark_from_daily_typing_result(h, monkeypatch):
+    card = await evening_card(h, monkeypatch)
+    await h.click(card, buttons(h, card)["⏭ 바로 시험보기"])
+    await h.click(card, buttons(h, card)["⌨️ 타이핑으로 확인"])
+    result = await h.say("예수 그리스도의 계시라", reply_to=h.bot.last)
+    b = buttons(h, result)
+    assert "☆ 북마크" in b and "확인 ✔" in b
+    await h.click(result, b["☆ 북마크"])
+    assert h.repo.marks[(h.sid, h.vid["계 1:1"])]["bookmarked"]
+    assert "⭐ 북마크 해제" in buttons(h, result)
+    await h.click(result, buttons(h, result)["확인 ✔"])
+    assert "이번 시간 카드를 마쳤어요" in result.text

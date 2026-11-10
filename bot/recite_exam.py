@@ -11,6 +11,7 @@ callback_data
   rs             장 고르기          rs:{장}  그 장 시험 (이어서)      rs:b  북마크만 시험
   ex:{시험id}:{번호}:{act}           act: a 정답 보기 · g0/g1/g2 채점 · t 타이핑 · b 북마크 · s 그만하기
                                      n 다음 절(바로 타이핑할 수 있게 답장 입력창을 연 문제를 보냄)
+                                     k 타이핑 결과 카드에서 북마크
   rk             북마크 목록        rb:{구절id}  북마크 해제
 """
 from __future__ import annotations
@@ -25,8 +26,8 @@ from . import dates
 from .common import repo, safe_edit, send_to_space
 from .recite import (COURSE, PASS_RATE, chapter_board, chapter_icon, exam_card_update,
                      exam_summary, grade_typing, toggle_mark, update_mark)
-from .recite_handlers import (MARK_TOAST, course_verses, delete_quietly, load_marks,
-                              reply_typing_result, retire_card, save_mark)
+from .recite_handlers import (MARK_TOAST, bookmark_btn, course_verses, delete_quietly, edit_markup,
+                              load_marks, reply_typing_result, retire_card, save_mark)
 
 MAX_BOOKMARK_BUTTONS = 15
 
@@ -41,6 +42,14 @@ def _cb(exam: dict, idx: int, act: str) -> str:
 
 def _restart_cb(exam: dict) -> str:
     return "rs:b" if exam["kind"] == "bookmark" else f"rs:{exam['chapter']}"
+
+
+def exam_result_markup(exam: dict, idx: int, typed_id: int, has_next: bool, bookmarked: bool):
+    """장별 시험 타이핑 결과의 버튼."""
+    first = [Btn("다음 절 ⌨️ ▶" if has_next else "📊 결과 보기", callback_data=_cb(exam, idx, f"n:{typed_id}"))]
+    if has_next:
+        first.append(Btn("⏸ 그만하기", callback_data=_cb(exam, idx, f"s:{typed_id}")))
+    return InlineKeyboardMarkup([first, [bookmark_btn(bookmarked, _cb(exam, idx, f"k:{typed_id}"))]])
 
 
 def _next_idx(exam: dict) -> int | None:
@@ -303,6 +312,15 @@ async def on_ex(update: Update, context, space: dict, args: list[str]):
                                f"다음에 이어서 볼 수 있어요.",
                         InlineKeyboardMarkup([[Btn("▶ 이어서 하기", callback_data=_restart_cb(exam))]]))
         return
+    if act == "k":   # 타이핑 결과 카드에서 북마크 켜고 끄기 (내용은 그대로, 버튼만 바꿈)
+        marks = await load_marks(r, space["id"])
+        new_mark = toggle_mark(marks.get(item["v"]))
+        await save_mark(r, space["id"], item["v"], new_mark)
+        await query.answer("⭐ 북마크했어요" if new_mark["bookmarked"] else "북마크를 해제했어요")
+        typed_id = int(args[3]) if len(args) > 3 and args[3].isdigit() else 0
+        await edit_markup(query, exam_result_markup(exam, idx, typed_id, _next_idx(exam) is not None,
+                                                    new_mark["bookmarked"]))
+        return
     if act == "n":   # 타이핑 채점 결과 → [다음 절 ▶]
         if len(args) > 3 and args[3].isdigit():
             await delete_quietly(context, space["chat_id"], int(args[3]))   # 내가 보낸 답
@@ -378,10 +396,9 @@ async def handle_exam_typing(update: Update, context, space: dict, exam_id: int,
         await retire_card(context, space, card_msg_id)
     has_next = _next_idx(exam) is not None
     note = f"\n\n🏅 <b>{exam['chapter']}장 통과!</b>" if newly_passed else ""
-    stop = [Btn("⏸ 그만하기", callback_data=_cb(exam, idx, f"s:{msg.message_id}"))] if has_next else []
+    bookmarked = bool((await load_marks(r, space["id"])).get(item["v"], {}).get("bookmarked"))
     await reply_typing_result(context, space, msg, verse, result, event,
-                              _cb(exam, idx, f"n:{msg.message_id}"),
-                              "다음 절 ⌨️ ▶" if has_next else "📊 결과 보기", note, stop)
+                              exam_result_markup(exam, idx, msg.message_id, has_next, bookmarked), note)
 
 
 async def on_rk(update: Update, context, space: dict, args: list[str]):

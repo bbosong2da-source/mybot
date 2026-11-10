@@ -5,6 +5,7 @@ callback_data
   rv:s:{n}  시작(하루 n절)   rv:n:{n}  하루 개수 변경   rv:p  쉬기/다시   rc:i  루틴 안내
   rc:{YYYYMMDD}:{idx}:{act}   카드 동작 — act: 1·2·3·4 단계, c 이어 말하기, a 정답 보기,
                               g0·g1·g2 채점, t 타이핑 / rc:{YYYYMMDD}:{hour}:m 다음 카드 더 하기
+                              n:{답 메시지} 타이핑 결과 → 다음 카드, k:{답 메시지} 타이핑 결과에서 북마크
 """
 from __future__ import annotations
 
@@ -299,6 +300,15 @@ async def on_recite_button(update: Update, context, space: dict, args: list[str]
         await query.answer("카드를 찾을 수 없어요.")
         return
     item = queue[idx]
+    if act == "k":   # 타이핑 결과 카드에서 북마크 켜고 끄기 (내용은 그대로, 버튼만 바꿈)
+        marks = await load_marks(r, space["id"])
+        new_mark = toggle_mark(marks.get(item["v"]))
+        await save_mark(r, space["id"], item["v"], new_mark)
+        await query.answer("⭐ 북마크했어요" if new_mark["bookmarked"] else "북마크를 해제했어요")
+        typed_id = int(args[3]) if len(args) > 3 and args[3].isdigit() else 0
+        has_next = _next_in_slot(queue, item["s"]) is not None
+        await edit_markup(query, daily_result_markup(day, idx, typed_id, has_next, new_mark["bookmarked"]))
+        return
     if act == "n":   # 타이핑 채점 결과 → 내가 보낸 답 메시지를 지우고 이 카드를 다음 카드로
         if len(args) > 3 and args[3].isdigit():
             await delete_quietly(context, space["chat_id"], int(args[3]))
@@ -377,9 +387,28 @@ async def retire_card(context, space: dict, card_msg_id: int) -> None:
             pass
 
 
+def bookmark_btn(bookmarked: bool, callback_data: str) -> Btn:
+    return Btn("⭐ 북마크 해제" if bookmarked else "☆ 북마크", callback_data=callback_data)
+
+
+def daily_result_markup(day: dt.date, idx: int, typed_id: int, has_next: bool, bookmarked: bool):
+    """매일 카드 타이핑 결과의 버튼."""
+    return InlineKeyboardMarkup([
+        [Btn("다음 카드 ▶" if has_next else "확인 ✔", callback_data=_cb(day, idx, f"n:{typed_id}"))],
+        [bookmark_btn(bookmarked, _cb(day, idx, f"k:{typed_id}"))],
+    ])
+
+
+async def edit_markup(query, markup) -> None:
+    try:
+        await query.edit_message_reply_markup(reply_markup=markup)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            log.info("버튼 갱신 실패: %s", e)
+
+
 async def reply_typing_result(context, space: dict, msg, verse: dict, result, event: str | None,
-                              next_cb: str, next_label: str, note: str = "",
-                              extra_buttons: list | None = None):
+                              markup, note: str = ""):
     """타이핑 채점 결과 카드. [다음 ▶]을 누르면 내가 보낸 답 메시지를 지우고 이 카드가 다음 문제로 바뀐다.
     '답장으로 입력해 주세요' 안내 메시지는 바로 지운다 (남아 있으면 답장 상태가 계속 잡히기 때문)."""
     icon = {2: "✅", 1: "🔸", 0: "❌"}[result.grade]
@@ -389,7 +418,7 @@ async def reply_typing_result(context, space: dict, msg, verse: dict, result, ev
         f"⌨️ <b>타이핑 채점</b> — 정확도 <b>{result.score:.0f}%</b> → {icon} {GRADE_LABELS[result.grade]}\n\n"
         f"<b>{escape(verse['ref'])}</b>\n{result.diff_html}\n\n"
         f"<i>밑줄 친 부분이 틀리거나 빠진 곳이에요.</i>{extra}{note}",
-        InlineKeyboardMarkup([[Btn(next_label, callback_data=next_cb)] + (extra_buttons or [])]))
+        markup)
     prompt = getattr(msg, "reply_to_message", None)
     if prompt is not None:
         await delete_quietly(context, space["chat_id"], prompt.message_id)
@@ -422,9 +451,9 @@ async def handle_typing(update: Update, context, space: dict, daykey: str, idx: 
     event = await grade_item(r, space["id"], member, rec, idx, result.grade, day)
     await retire_card(context, space, card_msg_id)
     has_next = _next_in_slot(rec["queue"], item["s"]) is not None
+    bookmarked = bool((await load_marks(r, space["id"])).get(item["v"], {}).get("bookmarked"))
     await reply_typing_result(context, space, msg, v, result, event,
-                              _cb(day, idx, f"n:{msg.message_id}"),
-                              "다음 카드 ▶" if has_next else "확인 ✔")
+                              daily_result_markup(day, idx, msg.message_id, has_next, bookmarked))
 
 
 # ---------------------------------------------------------------------------
