@@ -9,6 +9,7 @@
 
 callback_data
   rs             장 고르기          rs:{장}  그 장 시험 (이어서)      rs:b  북마크만 시험
+  rs:r{시험id}   그 시험에서 틀린 구절(조금 틀림+못 외움)만 다시   rs:o{시험id}  멈춘 다시 보기 이어서
   ex:{시험id}:{번호}:{act}           act: a 정답 보기 · g0/g1/g2 채점 · t 타이핑 · b 북마크 · s 그만하기
                                      n 다음 절(바로 타이핑할 수 있게 답장 입력창을 연 문제를 보냄)
                                      k 타이핑 결과 카드에서 북마크
@@ -33,7 +34,15 @@ MAX_BOOKMARK_BUTTONS = 15
 
 
 def _title(exam: dict) -> str:
+    if exam["kind"] == "retry":   # 틀린 구절만 다시 (chapter: 원래 시험의 장, 북마크 시험이면 없음)
+        return f"🔁 계시록 {exam['chapter']}장 다시 보기" if exam.get("chapter") else "🔁 틀린 구절 다시 보기"
     return "⭐ 북마크 시험" if exam["kind"] == "bookmark" else f"계시록 {exam['chapter']}장 시험"
+
+
+def _eul(word: str) -> str:
+    """받침이 있으면 '을', 없으면 '를' (예: 시험을, 다시 보기를)."""
+    last = next((c for c in reversed(word) if "가" <= c <= "힣"), "")
+    return "을" if last and (ord(last) - 0xAC00) % 28 else "를"
 
 
 def _cb(exam: dict, idx: int, act: str) -> str:
@@ -41,7 +50,18 @@ def _cb(exam: dict, idx: int, act: str) -> str:
 
 
 def _restart_cb(exam: dict) -> str:
-    return "rs:b" if exam["kind"] == "bookmark" else f"rs:{exam['chapter']}"
+    """처음부터 다시: 장별 시험이면 그 장 전체, 아니면 북마크 시험."""
+    return f"rs:{exam['chapter']}" if exam.get("chapter") else "rs:b"
+
+
+def _resume_cb(exam: dict) -> str:
+    """그만하기 뒤 이어서: 다시 보기 시험은 그 시험 그대로 이어서."""
+    return f"rs:o{exam['id']}" if exam["kind"] == "retry" else _restart_cb(exam)
+
+
+def _missed(exam: dict) -> list[dict]:
+    """완벽이 아닌 구절 (조금 틀림 + 못 외움)."""
+    return [i for i in exam["items"] if i["g"] in (0, 1)]
 
 
 def exam_result_markup(exam: dict, idx: int, typed_id: int, has_next: bool, bookmarked: bool):
@@ -103,9 +123,15 @@ def render_result(exam: dict, by_id: dict[int, dict], newly_passed: bool, intro:
         lines += ["", f"🔁 다시 볼 구절: {shown}"]
     lines += ["", "<i>완벽·조금 틀림인 절은 복습 일정에 들어가고, 아직 못 외운 절은 "
                   "새 구절 카드로 차근차근 다시 나와요.</i>"]
-    rows = [[Btn("🔁 다시 시험보기", callback_data=_restart_cb(exam)),
-             Btn("⭐ 북마크만 시험", callback_data="rs:b")],
-            [Btn("📖 진도판", callback_data="rv:v")]]
+    rows = []
+    missed = _missed(exam)
+    if missed:
+        rows.append([Btn(f"🔁 틀린 구절만 다시 ({len(missed)})", callback_data=f"rs:r{exam['id']}")])
+    rows.append([Btn("🔁 처음부터 다시" if exam.get("chapter") else "⭐ 북마크만 시험",
+                     callback_data=_restart_cb(exam))])
+    if exam.get("chapter"):
+        rows[-1].append(Btn("⭐ 북마크만 시험", callback_data="rs:b"))
+    rows.append([Btn("📖 진도판", callback_data="rv:v")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
@@ -273,7 +299,7 @@ async def _member_or_warn(r, space, query):
 
 
 async def on_rs(update: Update, context, space: dict, args: list[str]):
-    """rs / rs:{장} / rs:b"""
+    """rs / rs:{장} / rs:b / rs:r{시험id} 틀린 구절만 다시 / rs:o{시험id} 그 시험 이어서"""
     query = update.callback_query
     r = repo(context)
     member = await _member_or_warn(r, space, query)
@@ -284,9 +310,26 @@ async def on_rs(update: Update, context, space: dict, args: list[str]):
         text, markup = await render_picker(r, space, member)
     elif args[0] == "b":
         text, markup = await _begin(r, space, member, "bookmark", None)
+    elif args[0][:1] in ("r", "o") and args[0][1:].isdigit():
+        text, markup = await _retry_or_resume(r, space, args[0][0], int(args[0][1:]))
     else:
         text, markup = await _begin(r, space, member, "chapter", int(args[0]))
     await safe_edit(query, text, markup)
+
+
+async def _retry_or_resume(r, space: dict, mode: str, exam_id: int):
+    exam = await r.get_exam(space["id"], exam_id)
+    if not exam:
+        return "🌧️ 시험을 찾을 수 없어요. <code>/rv 시험</code>으로 다시 시작해 주세요.", None
+    if mode == "o":   # 멈춘 다시 보기 시험 이어서
+        done = sum(i["g"] is not None for i in exam["items"])
+        return await _show_current(r, space, exam, f"▶ 이어서 시작해요 ({done}/{len(exam['items'])} 완료)")
+    missed = _missed(exam)
+    if not missed:
+        return "🎉 다시 볼 구절이 없어요. 모두 완벽!", None
+    retry = await r.create_exam({"space_id": space["id"], "kind": "retry", "chapter": exam.get("chapter"),
+                                 "items": [{"v": i["v"], "g": None} for i in missed]})
+    return await _show_current(r, space, retry)
 
 
 async def on_ex(update: Update, context, space: dict, args: list[str]):
@@ -308,9 +351,9 @@ async def on_ex(update: Update, context, space: dict, args: list[str]):
             await delete_quietly(context, space["chat_id"], int(args[3]))
         await query.answer()
         done = sum(i["g"] is not None for i in exam["items"])
-        await safe_edit(query, f"⏸ <b>{_title(exam)}</b>을 멈췄어요 ({done}/{len(exam['items'])}).\n"
+        await safe_edit(query, f"⏸ <b>{_title(exam)}</b>{_eul(_title(exam))} 멈췄어요 ({done}/{len(exam['items'])}).\n"
                                f"다음에 이어서 볼 수 있어요.",
-                        InlineKeyboardMarkup([[Btn("▶ 이어서 하기", callback_data=_restart_cb(exam))]]))
+                        InlineKeyboardMarkup([[Btn("▶ 이어서 하기", callback_data=_resume_cb(exam))]]))
         return
     if act == "k":   # 타이핑 결과 카드에서 북마크 켜고 끄기 (내용은 그대로, 버튼만 바꿈)
         marks = await load_marks(r, space["id"])

@@ -124,7 +124,7 @@ async def test_exam_fail_on_unlearned_stays_new(h, monkeypatch):
     rec = h.repo.rdays[(h.sid, NOV8)]
     assert [x["seq"] for x in rec["queue"] if x["k"] == "new"] == [2, 5]
 
-    await h.click(msg, buttons(h, msg)["🔁 다시 시험보기"])       # 끝난 시험은 새로 시작
+    await h.click(msg, buttons(h, msg)["🔁 처음부터 다시"])       # 끝난 시험은 새로 시작
     assert "1/4" in msg.text
 
 
@@ -246,3 +246,56 @@ async def test_bookmark_from_daily_typing_result(h, monkeypatch):
     assert "⭐ 북마크 해제" in buttons(h, result)
     await h.click(result, buttons(h, result)["확인 ✔"])
     assert "이번 시간 카드를 마쳤어요" in result.text
+
+
+async def grade_all(h, msg, grades):
+    for g in grades:
+        await h.click(msg, buttons(h, msg)["👀 정답 보기"])
+        await h.click(msg, buttons(h, msg)[g])
+
+
+async def test_retry_only_missed_until_all_perfect(h, monkeypatch):
+    msg = await h.say("/rv 시험 1", handler=recite_handlers.cmd_recite, args=["시험", "1"])
+    await grade_all(h, msg, ["✅ 완벽", "❌ 못 외움", "🔸 조금 틀림", "✅ 완벽"])
+    b = buttons(h, msg)
+    assert "🔁 틀린 구절만 다시 (2)" in b and "🔁 처음부터 다시" in b
+
+    await h.click(msg, b["🔁 틀린 구절만 다시 (2)"])
+    assert "계시록 1장 다시 보기</b> · 1/2" in msg.text and "계 1:2" in msg.text
+    await grade_all(h, msg, ["✅ 완벽", "🔸 조금 틀림"])
+    assert "1장 다시 보기 결과" in msg.text and "통과" not in msg.text   # 🏅 판정 없음
+    assert "다시 볼 구절: 계 1:3" in msg.text
+    # 처음 시험에서 못 외웠던 1:2를 다시 보기에서 완벽 → 외운 구절로 등록
+    assert h.repo.cards[(h.sid, h.vid["계 1:2"])]["box"] == 2
+
+    await h.click(msg, buttons(h, msg)["🔁 틀린 구절만 다시 (1)"])
+    assert "1/1" in msg.text and "계 1:3" in msg.text
+    await grade_all(h, msg, ["✅ 완벽"])
+    b = buttons(h, msg)
+    assert not any("틀린 구절만" in t for t in b)                      # 모두 완벽 → 버튼 없음
+    assert not h.repo.members[h.sid].get("passed_chapters")          # 다시 보기로는 🏅 없음
+    await h.click(msg, b["🔁 처음부터 다시"])
+    assert "계시록 1장 시험</b> · 1/4" in msg.text
+
+
+async def test_retry_stop_and_resume_same_retry(h, monkeypatch):
+    msg = await h.say("/rv 시험 1", handler=recite_handlers.cmd_recite, args=["시험", "1"])
+    await grade_all(h, msg, ["❌ 못 외움", "❌ 못 외움", "✅ 완벽", "✅ 완벽"])
+    await h.click(msg, buttons(h, msg)["🔁 틀린 구절만 다시 (2)"])
+    await grade_all(h, msg, ["✅ 완벽"])
+    await h.click(msg, buttons(h, msg)["⏸ 그만하기"])
+    assert "다시 보기</b>를 멈췄어요 (1/2)" in msg.text
+    await h.click(msg, buttons(h, msg)["▶ 이어서 하기"])
+    assert "이어서 시작해요 (1/2 완료)" in msg.text and "2/2" in msg.text and "계 1:2" in msg.text
+
+
+async def test_retry_from_bookmark_exam(h, monkeypatch):
+    for ref in ("계 1:3", "계 1:4"):
+        h.repo.marks[(h.sid, h.vid[ref])] = {"space_id": h.sid, "verse_id": h.vid[ref],
+                                             "bookmarked": True, "auto": False, "fails": 0, "streak": 0}
+    msg = await h.say("/rv 시험 북마크", handler=recite_handlers.cmd_recite, args=["시험", "북마크"])
+    await grade_all(h, msg, ["🔸 조금 틀림", "✅ 완벽"])
+    await h.click(msg, buttons(h, msg)["🔁 틀린 구절만 다시 (1)"])
+    assert "틀린 구절 다시 보기</b> · 1/1" in msg.text and "계 1:3" in msg.text
+    await grade_all(h, msg, ["✅ 완벽"])
+    assert "틀린 구절 다시 보기 결과" in msg.text and "⭐ 북마크만 시험" in buttons(h, msg)
