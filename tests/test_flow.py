@@ -67,6 +67,9 @@ class FakeQuery:
     async def edit_message_text(self, text, reply_markup=None):
         self.message.text, self.message.reply_markup = text, reply_markup
 
+    async def edit_message_reply_markup(self, reply_markup=None):
+        self.message.reply_markup = reply_markup
+
 
 class Harness:
     def __init__(self, chat_id=1, user_id=1, thread=None, chat_type="private"):
