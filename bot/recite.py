@@ -19,7 +19,7 @@ from html import escape
 COURSE = "계시록"
 DEFAULT_BOOK = "계"
 DEFAULT_HOURS = "18-22"
-DAILY_CHOICES = (1, 2, 3)
+DAILY_CHOICES = (1, 2, 3, 4, 5)
 INTERVALS = (1, 3, 7, 15, 30, 60)   # 상자(box) 단계별 다음 복습까지 날짜
 MAX_REVIEWS = 15                    # 하루 복습 최대 개수 (밀린 복습 폭탄 방지)
 CHAIN_RATE = 0.4                    # 복습 중 '이어 말하기' 비율
@@ -196,7 +196,8 @@ def exam_summary(items: list[dict]) -> ExamSummary:
 
 
 def pending(queue: list[dict]) -> list[int]:
-    return [i for i, q in enumerate(queue) if q["g"] is None]
+    """아직 안 한 오늘 카드 ('➕ 더 복습' 카드는 제외)."""
+    return [i for i, q in enumerate(queue) if q["g"] is None and not q.get("x")]
 
 
 def assign_slot(queue: list[dict], hour: int, end_hour: int) -> list[int]:
@@ -220,7 +221,35 @@ class ReciteStatus:
 
 
 def queue_counts(queue: list[dict]) -> tuple[int, int]:
-    return len(queue), sum(q["g"] is not None for q in queue)
+    """(오늘 카드 수, 한 카드 수). '➕ 더 복습' 카드는 루틴 집계에 넣지 않는다."""
+    real = [q for q in queue if not q.get("x")]
+    return len(real), sum(q["g"] is not None for q in real)
+
+
+def pick_extra(queue: list[dict], cards: list[dict], verses: list[dict], rng: random.Random,
+               bookmarked: set[int] | frozenset = frozenset()) -> dict | None:
+    """오늘 카드를 다 한 뒤 남은 시간에 보낼 '➕ 더 복습' 카드.
+    이미 외운 구절 중 오늘 아직 안 나온 것에서, 북마크·덜 외운(상자 낮은) 구절을 먼저 고른다."""
+    seq_of = {v["id"]: v["seq"] for v in verses}
+    in_queue = {q["v"] for q in queue}
+    cand = [c for c in cards if c["verse_id"] in seq_of and c["verse_id"] not in in_queue]
+    if not cand:
+        return None
+    cand.sort(key=lambda c: (c["verse_id"] not in bookmarked, c["box"], c["due_date"]))
+    c = rng.choice(cand[:5])
+    seq = seq_of[c["verse_id"]]
+    kind = "chain" if seq > 1 and rng.random() < CHAIN_RATE else "recall"
+    return {"v": c["verse_id"], "seq": seq, "k": kind, "g": None, "s": None, "x": True}
+
+
+def extra_card_update(card: dict | None, grade: int, day: dt.date, bookmarked: bool = False) -> dict | None:
+    """'➕ 더 복습' 채점: 복습일 전에 미리 본 것이라 완벽이어도 간격을 늘리지 않는다.
+    조금 틀림 → 다음 복습을 늦어도 내일로, 못 외움 → 처음 단계부터 다시. None이면 바꾸지 않음."""
+    if card is None or grade == 2:
+        return None
+    if grade == 1:
+        return {"due_date": min(card["due_date"], day + dt.timedelta(days=1)), "last_grade": 1}
+    return apply_grade(card, 0, day, bookmarked=bookmarked)
 
 
 def expected_finish(learned: int, total: int, daily_new: int, today: dt.date) -> dt.date | None:
