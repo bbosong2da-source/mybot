@@ -27,7 +27,8 @@ from .quiz import parse_hours, quiz_streak
 from .recite import (COURSE, DAILY_CHOICES, DEFAULT_HOURS, GRADE_LABELS, ReciteStatus,
                      apply_grade, assign_slot, blanks, build_queue, chapter_board,
                      chapter_icon, expected_finish, grade_typing, parse_recite_text,
-                     pending, queue_counts, toggle_mark, update_mark)
+                     extra_card_update, pending, pick_extra, queue_counts, toggle_mark,
+                     update_mark)
 
 log = logging.getLogger(__name__)
 rng = random.Random()
@@ -154,7 +155,8 @@ def render_card(day: dt.date, queue: list[dict], idx: int, stage: str,
     item = queue[idx]
     total, done = queue_counts(queue)
     star = " ⭐" if bookmarked else ""
-    head = f"📖 <b>계시록 암송</b> · {KIND_LABEL[item['k']]}{star} · 오늘 {done}/{total}"
+    label = "➕ 더 복습" if item.get("x") else KIND_LABEL[item["k"]]
+    head = f"📖 <b>계시록 암송</b> · {label}{star} · 오늘 {done}/{total}"
     ref, body = escape(verse["ref"]), escape(verse["body"])
     rows = []
     if stage == "1":
@@ -241,6 +243,16 @@ async def grade_item(r, space_id: int, member: dict, rec: dict, idx: int, grade:
     card = cards.get(item["v"])
     mark = (await load_marks(r, space_id)).get(item["v"])
     new_mark, event = update_mark(mark, grade)
+    if item.get("x"):   # '➕ 더 복습': 틀렸을 때만 복습 일정을 앞당긴다
+        fields = extra_card_update(card, grade, day, new_mark["bookmarked"])
+        if fields and card:
+            await r.save_card({"space_id": space_id, "verse_id": item["v"],
+                               **{k: card[k] for k in ("learned_on", "box", "due_date", "last_grade")
+                                  if k in card}, **fields})
+        item["g"] = grade
+        await r.save_recite_day(rec)
+        await save_mark(r, space_id, item["v"], new_mark)
+        return event
     known = item["k"] == "new" and bool(item.get("q"))   # 4단계 없이 바로 시험
     new_fields = apply_grade(card, grade, day, known=known, bookmarked=new_mark["bookmarked"])
     await r.save_card({"space_id": space_id, "verse_id": item["v"],
@@ -460,7 +472,8 @@ async def handle_typing(update: Update, context, space: dict, daykey: str, idx: 
 # /rv 진도판과 설정
 # ---------------------------------------------------------------------------
 def _start_markup():
-    return InlineKeyboardMarkup([[Btn(f"하루 {n}절", callback_data=f"rv:s:{n}") for n in DAILY_CHOICES]])
+    btns = [Btn(f"하루 {n}절", callback_data=f"rv:s:{n}") for n in DAILY_CHOICES]
+    return InlineKeyboardMarkup([btns[:3], btns[3:]])
 
 
 async def render_board(r, space: dict, member: dict, intro: str | None = None):
@@ -512,8 +525,9 @@ async def render_board(r, space: dict, member: dict, intro: str | None = None):
     if total:
         markup_rows.append([Btn("📝 장별 시험", callback_data="rs"),
                             Btn(f"⭐ 북마크 ({n_marks})", callback_data="rk")])
-    markup_rows.append([Btn(("✔ " if member["daily_new"] == n else "") + f"하루 {n}절",
-                            callback_data=f"rv:n:{n}") for n in DAILY_CHOICES])
+    daily = [Btn(("✔ " if member["daily_new"] == n else "") + f"하루 {n}절", callback_data=f"rv:n:{n}")
+             for n in DAILY_CHOICES]
+    markup_rows += [daily[:3], daily[3:]]
     markup_rows.append([Btn("⏸ 쉬기" if member.get("active") else "▶ 다시 시작", callback_data="rv:p")])
     return "\n".join(lines), InlineKeyboardMarkup(markup_rows)
 
@@ -526,7 +540,7 @@ INTRO = (
     "• 채점: 정답 보고 스스로, 또는 ⌨️ 타이핑으로\n"
     "• 이미 외운 장은 <code>/rv 시험</code>으로 시험 보고 통과하면 건너뛰어요\n\n"
     "하루에 몇 절씩 외울까요?\n"
-    "<i>1절 약 13개월 · 2절 약 7개월 · 3절 약 4.5개월</i>"
+    "<i>1절 약 13개월 · 2절 약 7개월 · 3절 약 4.5개월 · 4절 약 3.3개월 · 5절 약 2.7개월</i>"
 )
 
 
@@ -717,6 +731,14 @@ async def issue_recite_slots(context, spaces: list[dict], now: dt.datetime, gap:
             if now.hour in (rec.get("sent_hours") or []):
                 continue
             batch = assign_slot(rec["queue"], now.hour, end)
+            if not batch:   # 오늘 카드를 다 했으면 이미 외운 구절로 '➕ 더 복습' 한 장 (매시간 한 장씩)
+                marks = await load_marks(r, space["id"])
+                extra = pick_extra(rec["queue"], await r.recite_cards(space["id"]), verses, rng,
+                                   {vid for vid, m in marks.items() if m.get("bookmarked")})
+                if extra:
+                    extra["s"] = now.hour
+                    rec["queue"].append(extra)
+                    batch = [len(rec["queue"]) - 1]
             rec["sent_hours"] = list(rec.get("sent_hours") or []) + [now.hour]
             await r.save_recite_day(rec)
             if not batch:

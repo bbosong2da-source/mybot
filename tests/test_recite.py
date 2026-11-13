@@ -364,3 +364,75 @@ async def test_off_space_gets_no_cards(h, monkeypatch):
     before = len(h.bot.sent)
     await jobs.minute_job(h.ctx())
     assert len(h.bot.sent) == before
+
+
+# --- 매시간 한 장씩 ('➕ 더 복습') · 하루 1~5절 ---------------------------------
+def test_extra_cards_not_counted_and_picked_from_learned():
+    from bot.recite import extra_card_update, pending, pick_extra, queue_counts
+    q = [{"v": 1, "g": 2, "s": 14}, {"v": 9, "g": None, "s": 15, "x": True}]
+    assert queue_counts(q) == (1, 1) and pending(q) == []
+    vs = _verses(10)
+    cards = [{"verse_id": 100 + i, "box": i % 3, "due_date": NOV7 + dt.timedelta(days=i)} for i in range(1, 8)]
+    rng = random.Random(1)
+    queue = [{"v": 101, "g": 2, "s": 14}]
+    for _ in range(20):
+        x = pick_extra(queue, cards, vs, rng)
+        assert x["x"] and x["v"] != 101 and x["k"] in ("recall", "chain")
+    assert pick_extra(queue, cards, vs, rng, bookmarked={107})["v"] == 107   # 북마크 먼저
+    assert pick_extra([{"v": 100 + i} for i in range(1, 8)], cards, vs, rng) is None
+    card = {"box": 3, "due_date": NOV7 + dt.timedelta(days=10)}
+    assert extra_card_update(card, 2, NOV7) is None                           # 완벽: 그대로
+    assert extra_card_update(card, 1, NOV7)["due_date"] == NOV8                 # 조금 틀림: 내일
+    assert extra_card_update(card, 0, NOV7)["box"] == 0                         # 못 외움: 처음부터
+
+
+async def test_hourly_card_every_hour_with_extra_reviews(h, monkeypatch):
+    await h.say("/rv 1", handler=recite_handlers.cmd_recite, args=["1"])
+    await h.say("/rv 14-22", handler=recite_handlers.cmd_recite, args=["14-22"])
+    sid = next(iter(h.repo.members))
+    vid = {v["ref"]: v["id"] for v in h.repo.rverses.values()}
+    for ref in ("계 1:2", "계 1:3", "계 1:4"):          # 이미 외운 구절 3개
+        h.repo.cards[(sid, vid[ref])] = {"space_id": sid, "verse_id": vid[ref], "box": 3,
+                                         "due_date": NOV7 + dt.timedelta(days=9), "learned_on": NOV7}
+    await h.say("/off", handler=handlers.cmd_off)        # 밤 점검 등 다른 메시지 없이 암송만 보려고
+    await h.say("/on", handler=handlers.cmd_on)
+    await h.say("/t off", handler=handlers.cmd_time, args=["off"])
+    await h.say("/q off", handler=quiz_handlers.cmd_quiz, args=["off"])
+
+    sent_by_hour = {}
+    for hour in range(14, 23):
+        at(monkeypatch, NOV7, hour)
+        before = len(h.bot.sent)
+        await jobs.minute_job(h.ctx())
+        new = [m for m in h.bot.sent[before:] if "계시록 암송</b>" in m.text]
+        sent_by_hour[hour] = [m.text for m in new]           # 받은 순간의 내용
+        for card in new:                                  # 받은 카드는 바로 풀기
+            b = buttons(h, card)
+            if "⏭ 바로 시험보기" in b:
+                await h.click(card, b["⏭ 바로 시험보기"])
+            await h.click(card, buttons(h, card)["👀 정답 보기"])
+            await h.click(card, buttons(h, card)["✅ 완벽"])
+
+    assert "🆕 새 구절" in sent_by_hour[14][0]           # 14시: 오늘 카드(새 구절 1절)
+    extra_hours = [hr for hr in range(15, 23) if sent_by_hour[hr]]
+    assert extra_hours == [15, 16, 17]                   # 그 뒤 매시간 '더 복습' (외운 구절 3개만큼)
+    assert all("➕ 더 복습" in sent_by_hour[hr][0] and "오늘 1/1" in sent_by_hour[hr][0]
+               for hr in extra_hours)
+    rec = h.repo.rdays[(sid, NOV7)]
+    assert sum(1 for q in rec["queue"] if q.get("x")) == 3
+    # 더 복습을 완벽으로 풀어도 복습 일정은 그대로, 루틴은 1/1
+    assert h.repo.cards[(sid, vid["계 1:2"])]["due_date"] == NOV7 + dt.timedelta(days=9)
+    lst = await h.say("/l", handler=handlers.cmd_list)
+    assert any("🍋 📖 계시록 암송 1/1" in t for t, _ in h.buttons(lst))
+
+
+async def test_daily_up_to_five(h, monkeypatch):
+    msg = await h.say("/rv", handler=recite_handlers.cmd_recite)
+    assert "하루 5절" in buttons(h, msg) and "5절 약 2.7개월" in msg.text
+    msg = await h.say("/rv 5", handler=recite_handlers.cmd_recite, args=["5"])
+    assert "하루 새 구절 <b>5절</b>" in msg.text and "✔ 하루 5절" in buttons(h, msg)
+    sid = next(iter(h.repo.members))
+    at(monkeypatch, NOV8, 18)
+    await jobs.minute_job(h.ctx())
+    rec = h.repo.rdays[(sid, NOV8)]
+    assert len([q for q in rec["queue"] if q["k"] == "new"]) == 5
